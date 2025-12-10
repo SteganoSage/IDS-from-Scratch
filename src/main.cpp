@@ -10,6 +10,7 @@
 #include <csignal>
 #include <sstream>
 #include <iomanip>
+#include "Headers.hpp"
 
 struct Packet {
     timeval ts;
@@ -33,6 +34,81 @@ public:
 
 static pcap_t* g_handle = nullptr;
 static std::atomic<bool> g_running{true};
+
+void parse_and_print(const Packet& pkt) {
+    const uint8_t* raw = pkt.data.data();
+    std::size_t caplen = pkt.caplen;
+
+    
+    if (caplen < sizeof(EthernetHeader)) return;
+
+    const EthernetHeader* eth = reinterpret_cast<const EthernetHeader*>(raw);
+    uint16_t ethertype = eth->ntoh_ethertype();
+
+    std::cout << "Ethernet: src=" << format_mac(eth->src_mac)
+              << " dst=" << format_mac(eth->dest_mac)
+              << " type=0x" << std::hex << ethertype << std::dec << "\n";
+
+    
+    if (ethertype != 0x0800) return;
+
+   
+    std::size_t ip_offset = sizeof(EthernetHeader);
+    if (caplen < ip_offset + sizeof(IPv4Header)) return; // ensure at least minimal IPv4 available
+
+    const IPv4Header* ip = reinterpret_cast<const IPv4Header*>(raw + ip_offset);
+    // Now we must ensure the full IP header (including options) is within caplen
+    std::size_t ip_header_len = ip->header_length_bytes();
+    if (ip_header_len < 20) return; // invalid IHL
+    if (caplen < ip_offset + ip_header_len) return; // truncated IP header
+
+    uint32_t src_ip = ip->ntoh_src_addr();
+    uint32_t dst_ip = ip->ntoh_dst_addr();
+
+    std::cout << "IPv4: src=" << format_ipv4(src_ip)
+              << " dst=" << format_ipv4(dst_ip)
+              << " proto=" << int(ip->protocol)
+              << " ihl=" << ip_header_len << "\n";
+
+    
+    std::size_t l4_offset = ip_offset + ip_header_len;
+    if (ip->protocol == 6) { // TCP
+        if (caplen < l4_offset + sizeof(TCPHeader)) return; // minimal TCP header
+        const TCPHeader* tcp = reinterpret_cast<const TCPHeader*>(raw + l4_offset);
+        std::size_t tcp_hdr_len = tcp->header_length_bytes();
+        if (tcp_hdr_len < 20) return; // invalid data offset
+        if (caplen < l4_offset + tcp_hdr_len) return; // truncated TCP header
+
+        uint16_t sport = tcp->ntoh_src_port();
+        uint16_t dport = tcp->ntoh_dst_port();
+
+        std::cout << "TCP: sport=" << sport << " dport=" << dport
+                  << " flags=" << std::hex << int(tcp->flags) << std::dec
+                  << " hdr_len=" << tcp_hdr_len << "\n";
+
+        // payload start:
+        std::size_t payload_offset = l4_offset + tcp_hdr_len;
+        if (payload_offset < caplen) {
+            std::size_t payload_len = caplen - payload_offset;
+            std::cout << "Payload length: " << payload_len << "\n";
+            // you can inspect bytes: raw + payload_offset, length payload_len
+        }
+    } else if (ip->protocol == 17) { // UDP
+        if (caplen < l4_offset + sizeof(UDPHeader)) return;
+        const UDPHeader* udp = reinterpret_cast<const UDPHeader*>(raw + l4_offset);
+        uint16_t sport = udp->ntoh_src_port();
+        uint16_t dport = udp->ntoh_dst_port();
+        uint16_t udplen = udp->ntoh_length();
+        std::cout << "UDP: sport=" << sport << " dport=" << dport << " len=" << udplen << "\n";
+        std::size_t payload_offset = l4_offset + sizeof(UDPHeader);
+        if (payload_offset < caplen) {
+            std::size_t payload_len = caplen - payload_offset;
+            std::cout << "Payload len: " << payload_len << "\n";
+        }
+    } else {
+        // other protocols (ICMP etc.)
+    }
+}
 
 extern "C" void packet_handler(u_char* user, const struct pcap_pkthdr* header, const u_char* bytes){
 	if (!user || !header || !bytes) return;;
@@ -60,6 +136,8 @@ void worker(ThreadSafeQueue &q, int id) {
         }
         os << std::dec;
         std::cout << os.str() << std::endl;
+
+		parse_and_print(p);
     }
 }
 
