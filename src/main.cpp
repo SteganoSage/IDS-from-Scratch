@@ -1,7 +1,11 @@
 #include <iostream>
 #include<pcap.h>
 
+extern "C" void packet_handler(u_char* user, const struct pcap_pkthdr* header, const u_char* bytes){
+	(void)user;
 
+	std::cout << "Packet_len : "<< header->len << std :: endl << "Caplen : "<< header->caplen << std::endl<< "ts : " << header->ts.tv_sec << "." << header->ts.tv_usec << "\n";
+}
 
 int main(int argc, char* argv[]){
 
@@ -26,7 +30,12 @@ int main(int argc, char* argv[]){
 	}
 
 	std::cout << "[+] Opened handle \n";
+
+	std::cout << "Capturing 5 packets\n";
+	pcap_loop(handle,5,packet_handler,nullptr);
+	
 	pcap_close(handle);
+	std::cout<<"Done\n";
 	return 0;
 
 }
