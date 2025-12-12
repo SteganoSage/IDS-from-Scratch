@@ -21,10 +21,20 @@ find_package(OpenSSL QUIET)
 
 # Add executable
 add_executable(ids
-    src/main.cpp
+    src/main2.cpp
+    src/packet.cpp
+    src/queue.cpp
+    src/packet_parser.cpp
+    src/capture.cpp
+    src/worker.cpp
+    src/utils.cpp
+    src/rule_parser.cpp
+    src/rule_matcher.cpp
+
 )
 
 # Use target-specific include/link/compile options (safer)
+target_include_directories(ids PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(ids PRIVATE ${PCAP_INCLUDE_DIRS})
 target_link_directories(ids PRIVATE ${PCAP_LIBRARY_DIRS})
 
