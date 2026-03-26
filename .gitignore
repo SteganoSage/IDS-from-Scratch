@@ -1,0 +1,88 @@
+# =========================
+# 🔧 C++ / CMake / Build
+# =========================
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.o
+*.out
+*.exe
+*.a
+*.so
+*.dll
+
+# Your compiled binary
+ids
+
+# =========================
+# 🐍 Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.env
+.venv
+venv/
+
+# =========================
+# 📦 ML Models / Artifacts (VERY IMPORTANT)
+# =========================
+artifacts/
+*.pkl
+*.joblib
+*.keras
+*.h5
+
+# Large trained models
+anomaly_model_v2_tuned.joblib
+iforest_*.pkl
+lgbm_*.pkl
+rf_*.pkl
+xgb_*.pkl
+
+# =========================
+# 📊 Data / Logs
+# =========================
+data/
+*.log
+ids_alerts.log
+
+# =========================
+# 🧪 Temporary / Testing Outputs
+# =========================
+test-pcaps/*.pcap
+*.tmp
+
+# =========================
+# 📁 OS / Editor junk
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# =========================
+# 🔐 Sensitive / Config
+# =========================
+*.env
+config/*.local
+
+# =========================
+# 📦 Archives
+# =========================
+*.zip
+*.tar
+*.gz
+
+# =========================
+# ⚠️ Optional (uncomment if needed)
+# =========================
+# Ignore generated features if reproducible
+# features.json
+# features_v2.json
+# labels.json
