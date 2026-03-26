@@ -1,0 +1,26 @@
+{
+  "label_column": "Label",
+  "label_names": {
+    "0": {
+      "name": "Benign"
+    },
+    "1": {
+      "name": "BruteForce"
+    },
+    "2": {
+      "name": "DoS"
+    },
+    "3": {
+      "name": "PortScan"
+    },
+    "4": {
+      "name": "Bot"
+    },
+    "5": {
+      "name": "WebAttack"
+    },
+    "6": {
+      "name": "Infiltration"
+    }
+  }
+}
