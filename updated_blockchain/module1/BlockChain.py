@@ -8,6 +8,25 @@ from .CryptoUtils import CryptoUtils
 
 
 # ---------------------------------------------------------------------------
+# Timestamp normalisation helper
+# ---------------------------------------------------------------------------
+
+def _norm_ts(ts: float) -> float:
+    """
+    Round a unix timestamp to 6 decimal places.
+
+    Why: JSON serialisation and SQLite REAL storage can both introduce
+    sub-microsecond floating-point drift.  A value written as
+    1718123456.789012 may come back as 1718123456.7890120 or
+    1718123456.789012 depending on the path.  Rounding to 6 d.p. (1 µs
+    resolution) eliminates that drift while still being finer than any
+    real network jitter.  Applied consistently at every write/read point
+    so calculate_hash() always sees the same bits.
+    """
+    return round(ts, 6)
+
+
+# ---------------------------------------------------------------------------
 # AlertTransaction
 # ---------------------------------------------------------------------------
 
@@ -29,7 +48,7 @@ class AlertTransaction:
                        e.g. {"rf_model": 0.97, "svm_model": 0.91}
     features_summary : dict of raw / aggregated network features used
                        e.g. {"src_ip": "10.0.0.1", "packet_rate": 4500}
-    timestamp        : unix epoch (float) when the alert was raised
+    timestamp        : unix epoch (float, µs precision) when alert was raised
     signature        : ECDSA signature over the canonical alert fields
     signer_address   : hex address derived from the signer's public key
     tx_id            : SHA-256( signing_data + signature_hex )
@@ -47,7 +66,9 @@ class AlertTransaction:
         self.tx_id: Optional[str] = None
         self.node_id = node_id
         self.alert_type = alert_type
-        self.timestamp = timestamp if timestamp is not None else time.time()
+        # Normalise at creation so the value stored in memory, in the DB,
+        # and serialised to JSON are all identical bit-for-bit representations.
+        self.timestamp = _norm_ts(timestamp if timestamp is not None else time.time())
         self.detector_outputs = detector_outputs
         self.features_summary = features_summary
         self.signature: Optional[bytes] = None
@@ -62,7 +83,7 @@ class AlertTransaction:
             "tx_id": self.tx_id,
             "node_id": self.node_id,
             "alert_type": self.alert_type,
-            "timestamp": self.timestamp,
+            "timestamp": self.timestamp,       # already normalised
             "detector_outputs": self.detector_outputs,
             "features_summary": self.features_summary,
             "signer_address": self.signer_address,
@@ -73,19 +94,29 @@ class AlertTransaction:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "AlertTransaction":
-        """Reconstruct an AlertTransaction from a serialised dict."""
-        tx = cls(
-            node_id=data["node_id"],
-            alert_type=data["alert_type"],
-            detector_outputs=data["detector_outputs"],
-            features_summary=data["features_summary"],
-            timestamp=data["timestamp"],
-        )
-        tx.tx_id = data.get("tx_id")
-        tx.signer_address = data.get("signer_address")
-        sig_hex = data.get("signature")
-        if sig_hex:
-            tx.signature = bytes.fromhex(sig_hex)
+        """
+        Reconstruct an AlertTransaction from a serialised dict.
+
+        Uses object.__new__ to bypass __init__ so that:
+          - No timestamp is auto-generated (we restore the stored one).
+          - Every field is set to exactly the stored value — no side effects.
+
+        The stored tx_id and signature are trusted directly; they are not
+        recomputed here.  Callers that need to re-verify the signature should
+        call alert.verify(public_key) explicitly.
+        """
+        tx = object.__new__(cls)
+        # Normalise timestamp on the way in — guards against any sub-µs
+        # drift introduced by JSON or SQLite REAL storage.
+        tx.timestamp        = _norm_ts(data["timestamp"])
+        tx.node_id          = data["node_id"]
+        tx.alert_type       = data["alert_type"]
+        tx.detector_outputs = data["detector_outputs"]
+        tx.features_summary = data["features_summary"]
+        tx.tx_id            = data.get("tx_id")
+        tx.signer_address   = data.get("signer_address")
+        sig_hex             = data.get("signature")
+        tx.signature        = bytes.fromhex(sig_hex) if sig_hex else None
         return tx
 
     # ------------------------------------------------------------------
@@ -95,12 +126,12 @@ class AlertTransaction:
     def _signing_data(self) -> str:
         """Canonical string that is signed (excludes tx_id and signature)."""
         payload = {
-            "node_id": self.node_id,
-            "alert_type": self.alert_type,
-            "timestamp": self.timestamp,
+            "node_id":          self.node_id,
+            "alert_type":       self.alert_type,
+            "timestamp":        self.timestamp,    # normalised float
             "detector_outputs": self.detector_outputs,
             "features_summary": self.features_summary,
-            "signer_address": self.signer_address,
+            "signer_address":   self.signer_address,
         }
         return json.dumps(payload, sort_keys=True)
 
@@ -138,19 +169,30 @@ class Block:
     PBFT signatures (prepare / commit) are appended after consensus but are
     intentionally excluded from the hash to keep the hash stable across the
     consensus rounds.
+
+    Construction paths
+    ------------------
+    __init__      — normal construction (new block or genesis).
+                    Calls calculate_hash() exactly once at the end.
+    from_dict()   — reconstruction from serialised data (DB load, wire sync).
+                    Uses object.__new__ to skip __init__ entirely, so
+                    calculate_hash() is NEVER called during reconstruction.
+                    The stored block_hash is trusted and assigned directly.
+                    This eliminates the double-compute that caused hash
+                    mismatches on restart.
     """
 
     SEVERITY_MAP: Dict[str, str] = {
-        "recon": "low",
-        "port_scan": "low",
-        "brute_force": "medium",
-        "malware": "medium",
+        "recon":                "low",
+        "port_scan":            "low",
+        "brute_force":          "medium",
+        "malware":              "medium",
         "privilege_escalation": "high",
-        "lateral_movement": "high",
-        "data_exfiltration": "critical",
-        "ransomware": "critical",
-        "DDoS": "high",
-        "SQLi": "high",
+        "lateral_movement":     "high",
+        "data_exfiltration":    "critical",
+        "ransomware":           "critical",
+        "DDoS":                 "high",
+        "SQLi":                 "high",
     }
 
     def __init__(
@@ -163,23 +205,25 @@ class Block:
         proposer_id: str = None,
         timestamp: float = None,
     ):
-        self.block_number = block_number
-        self.timestamp = timestamp if timestamp is not None else time.time()
-        self.previous_hash = previous_hash
-        self.alert = alert                   # single AlertTransaction (or None)
+        self.block_number    = block_number
+        # Normalise block timestamp for the same reason as alert timestamp.
+        self.timestamp       = _norm_ts(timestamp if timestamp is not None else time.time())
+        self.previous_hash   = previous_hash
+        self.alert           = alert
 
-        self.view_number = view_number
-        self.sequence_number = sequence_number
-        self.proposer_id = proposer_id
+        self.view_number     = view_number if view_number is not None else 0
+        self.sequence_number = sequence_number if sequence_number is not None else 0
+        self.proposer_id     = proposer_id
 
         # Populated during / after PBFT consensus
         self.prepare_signatures: List[Dict] = []
-        self.commit_signatures: List[Dict] = []
+        self.commit_signatures:  List[Dict] = []
 
         # Derived fields
         self.alert_type = alert.alert_type if alert else None
-        self.severity = self._get_severity()
+        self.severity   = self._get_severity()
 
+        # Compute hash exactly once at construction time.
         self.block_hash = self.calculate_hash()
 
     # ------------------------------------------------------------------
@@ -195,17 +239,20 @@ class Block:
         """
         Hash covers all header fields plus the alert's tx_id (if present).
         PBFT signatures are excluded so the hash is stable before/after consensus.
+
+        All numeric fields are included as-is from the normalised stored values
+        so the hash is deterministic across serialise → store → load cycles.
         """
         header = {
-            "block_number": self.block_number,
-            "timestamp": self.timestamp,
-            "previous_hash": self.previous_hash,
-            "view_number": self.view_number,
+            "block_number":   self.block_number,
+            "timestamp":      self.timestamp,       # normalised float
+            "previous_hash":  self.previous_hash,
+            "view_number":    self.view_number,
             "sequence_number": self.sequence_number,
-            "proposer_id": self.proposer_id,
-            "alert_tx_id": self.alert.tx_id if self.alert else None,
-            "alert_type": self.alert_type,
-            "severity": self.severity,
+            "proposer_id":    self.proposer_id,
+            "alert_tx_id":    self.alert.tx_id if self.alert else None,
+            "alert_type":     self.alert_type,
+            "severity":       self.severity,
         }
         return CryptoUtils.sha256(json.dumps(header, sort_keys=True))
 
@@ -229,40 +276,76 @@ class Block:
 
     def to_dict(self) -> Dict:
         return {
-            "block_number": self.block_number,
-            "timestamp": self.timestamp,
-            "previous_hash": self.previous_hash,
-            "view_number": self.view_number,
-            "sequence_number": self.sequence_number,
-            "proposer_id": self.proposer_id,
-            "alert": self.alert.to_dict() if self.alert else None,
-            "alert_type": self.alert_type,
-            "severity": self.severity,
+            "block_number":      self.block_number,
+            "timestamp":         self.timestamp,
+            "previous_hash":     self.previous_hash,
+            "view_number":       self.view_number,
+            "sequence_number":   self.sequence_number,
+            "proposer_id":       self.proposer_id,
+            "alert":             self.alert.to_dict() if self.alert else None,
+            "alert_type":        self.alert_type,
+            "severity":          self.severity,
             "prepare_signatures": self.prepare_signatures,
-            "commit_signatures": self.commit_signatures,
-            "block_hash": self.block_hash,
+            "commit_signatures":  self.commit_signatures,
+            "block_hash":        self.block_hash,
         }
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Block":
-        """Reconstruct a Block from a serialised dict (e.g. received over the wire)."""
+        """
+        Reconstruct a Block from a serialised dict (DB load or wire sync).
+
+        KEY DESIGN: uses object.__new__ to bypass __init__ completely.
+
+        Why this matters
+        ----------------
+        The old implementation called cls(...) which called __init__, which
+        always called calculate_hash() at the end.  Then from_dict overwrote
+        block.block_hash with the stored value.  The problem was that
+        replace_chain() then called cur.calculate_hash() again to validate,
+        comparing the freshly computed hash against the stored one.  Any
+        field reconstructed with even a tiny deviation (e.g. alert.timestamp
+        loaded as block.timestamp from the DB) caused a mismatch and the
+        whole chain was rejected.
+
+        With object.__new__ there is no auto-compute.  Every field is set
+        directly from the stored data.  calculate_hash() is only called
+        explicitly by the caller (e.g. replace_chain for peer-sourced blocks).
+        """
+        # Reconstruct alert first (needed for alert_type / severity below)
         alert = None
         if data.get("alert"):
             alert = AlertTransaction.from_dict(data["alert"])
 
-        block = cls(
-            block_number=data["block_number"],
-            alert=alert,
-            previous_hash=data["previous_hash"],
-            view_number=data.get("view_number", 0),
-            sequence_number=data.get("sequence_number", 0),
-            proposer_id=data.get("proposer_id"),
-            timestamp=data["timestamp"],
+        block = object.__new__(cls)
+
+        block.block_number    = data["block_number"]
+        block.timestamp       = _norm_ts(data["timestamp"])
+        block.previous_hash   = data["previous_hash"]
+        block.view_number     = data.get("view_number") or 0
+        block.sequence_number = data.get("sequence_number") or 0
+        block.proposer_id     = data.get("proposer_id")
+        block.alert           = alert
+
+        # Prefer the explicit top-level fields stored in the dict.
+        # Fall back to deriving from the alert object so that blocks
+        # arriving over the wire (which may omit these fields) still work.
+        block.alert_type = (
+            data.get("alert_type")
+            or (alert.alert_type if alert else None)
         )
-        block.prepare_signatures = data.get("prepare_signatures", [])
-        block.commit_signatures = data.get("commit_signatures", [])
-        # Trust the received hash for pool lookups; validate separately.
+        block.severity = (
+            data.get("severity")
+            or (Block.SEVERITY_MAP.get(block.alert_type, "medium") if block.alert_type else None)
+        )
+
+        block.prepare_signatures = data.get("prepare_signatures") or []
+        block.commit_signatures  = data.get("commit_signatures")  or []
+
+        # Trust the stored hash — do NOT recompute here.
+        # Callers that need to verify integrity call calculate_hash() explicitly.
         block.block_hash = data["block_hash"]
+
         return block
 
 
@@ -314,8 +397,8 @@ class PendingBlockPool:
         Secondary: proposer_id (str)       — lexicographic tiebreak
         """
         alert = block_dict.get("alert") or {}
-        ts = alert.get("timestamp", float("inf"))
-        pid = str(block_dict.get("proposer_id", ""))
+        ts    = alert.get("timestamp", float("inf"))
+        pid   = str(block_dict.get("proposer_id", ""))
         return (ts, pid)
 
     # ------------------------------------------------------------------
@@ -347,7 +430,6 @@ class PendingBlockPool:
             if alert_id and alert_id in self._seen_alert_ids:
                 # Another node already proposed a block for this alert.
                 # Keep whichever has the earlier (timestamp, proposer_id).
-                # Find the existing entry for this alert_id.
                 existing = next(
                     (b for b in self._pool
                      if (b.get("alert") or {}).get("tx_id") == alert_id),
@@ -447,13 +529,27 @@ class IDSBlockchain:
     * create_block() pops ONE pending alert and wraps it in a new Block.
     * add_block() validates block_number, previous_hash, and block_hash
       before appending.
+
+    Chain loading (DB restart path)
+    --------------------------------
+    load_chain_from_db() is the correct entry point for DB restoration.
+    It reconstructs blocks via Block.from_dict() (which does NOT recompute
+    hashes), validates only the chain linkage (previous_hash chain), and
+    restores sequence/view counters.  It does NOT call replace_chain() so
+    it is not subject to the "must be longer than current chain" guard that
+    replace_chain() enforces for peer-sourced chains.
+
+    replace_chain() is reserved for peer-sourced chains (network sync).
+    It calls calculate_hash() on every block to defend against a malicious
+    peer sending tampered blocks.  DB-loaded blocks are trusted because
+    this node wrote them itself.
     """
 
     def __init__(self):
         self.chain: List[Block] = []
         self.pending_alerts: List[AlertTransaction] = []
         self.validators: Dict[str, VerifyingKey] = {}
-        self.current_view = 0
+        self.current_view     = 0
         self.current_sequence = 0
 
         self._create_genesis_block()
@@ -508,16 +604,16 @@ class IDSBlockchain:
         if not self.pending_alerts:
             return None
 
-        alert = self.pending_alerts[0]   # take the oldest (FIFO)
+        alert          = self.pending_alerts[0]   # take the oldest (FIFO)
         previous_block = self.chain[-1]
 
         new_block = Block(
-            block_number=len(self.chain),
-            alert=alert,
-            previous_hash=previous_block.block_hash,
-            view_number=self.current_view,
-            sequence_number=self.current_sequence,
-            proposer_id=proposer_id,
+            block_number    = len(self.chain),
+            alert           = alert,
+            previous_hash   = previous_block.block_hash,
+            view_number     = self.current_view,
+            sequence_number = self.current_sequence,
+            proposer_id     = proposer_id,
         )
 
         self.current_sequence += 1
@@ -550,6 +646,11 @@ class IDSBlockchain:
 
         self.chain.append(block)
 
+        # Keep current_sequence in sync so create_block() always
+        # produces the correct next sequence_number
+        self.current_sequence = block.sequence_number + 1
+        self.current_view     = getattr(block, 'view_number', self.current_view)
+
         # Remove the committed alert from the pending queue
         if block.alert:
             self.pending_alerts = [
@@ -559,7 +660,92 @@ class IDSBlockchain:
         return True
 
     # ------------------------------------------------------------------
-    # Chain validation
+    # DB restore path  (trusted — no hash recompute)
+    # ------------------------------------------------------------------
+
+    def load_chain_from_db(self, block_dicts: List[Dict]) -> bool:
+        """
+        Restore the chain from this node's own SQLite database.
+
+        This is the ONLY correct entry point for DB-based restoration.
+        It differs from replace_chain() in two important ways:
+
+        1. It does NOT enforce "must be longer than current chain".
+           On startup the chain contains only the genesis block (length 1),
+           and the DB blocks start at block_number=1, so the list passed in
+           may have any length >= 0.
+
+        2. It does NOT call calculate_hash() on restored blocks.
+           This node wrote these blocks itself; they are trusted.
+           Only linkage (previous_hash chain) is verified.
+
+        3. Genesis is always in self.chain already (created by __init__).
+           The block_dicts list contains only block_number >= 1 rows from
+           the DB (genesis is never stored).  This method stitches them
+           onto the existing genesis without replacing it.
+
+        Returns True if the chain was extended, False if nothing to load
+        or a linkage error was found (chain stays at genesis in that case).
+        """
+        if not block_dicts:
+            print("[Chain] DB load — no blocks to restore")
+            return False
+
+        restored: List[Block] = []
+        for d in block_dicts:
+            try:
+                restored.append(Block.from_dict(d))
+            except Exception as e:
+                print(f"[Chain] DB load — failed to parse block #{d.get('block_number')}: {e}")
+                return False
+
+        # Validate linkage only — hashes are trusted (written by this node).
+        # Start from the current chain tail (genesis or any already-loaded blocks).
+        prev_hash = self.chain[-1].block_hash
+        expected_number = len(self.chain)
+
+        for blk in restored:
+            if blk.block_number != expected_number:
+                print(
+                    f"[Chain] DB load — block_number mismatch: "
+                    f"got {blk.block_number}, expected {expected_number}"
+                )
+                return False
+            if blk.previous_hash != prev_hash:
+                print(
+                    f"[Chain] DB load — broken link at block {blk.block_number}: "
+                    f"previous_hash {blk.previous_hash[:16]}… != {prev_hash[:16]}…"
+                )
+                return False
+            prev_hash       = blk.block_hash
+            expected_number += 1
+
+        # All links valid — append to chain
+        self.chain.extend(restored)
+
+        # Restore sequence and view counters from the last appended block
+        last = self.chain[-1]
+        self.current_sequence = (last.sequence_number or 0) + 1
+        self.current_view     = last.view_number or 0
+
+        # Remove any pending alerts already in the restored chain
+        committed_tx_ids = {
+            b.alert.tx_id
+            for b in self.chain[1:]
+            if b.alert and b.alert.tx_id
+        }
+        self.pending_alerts = [
+            a for a in self.pending_alerts if a.tx_id not in committed_tx_ids
+        ]
+
+        print(
+            f"[Chain] DB load complete — chain length {len(self.chain)} | "
+            f"next sequence={self.current_sequence}"
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # Network sync path  (untrusted — full hash verification)
     # ------------------------------------------------------------------
 
     def replace_chain(self, block_dicts: List[Dict]) -> bool:
@@ -572,6 +758,11 @@ class IDSBlockchain:
           2. Genesis block must match ours exactly
           3. Every block's previous_hash must match the prior block's hash
           4. Every block's hash must be self-consistent (calculate_hash check)
+             — this defends against a malicious peer sending tampered blocks
+
+        block_dicts MUST include the genesis block as the first entry.
+        The /sync/chain endpoint provides this automatically because it
+        serialises self.blockchain.chain (which starts with genesis).
 
         On success:
           - self.chain is replaced with the reconstructed blocks
@@ -584,7 +775,7 @@ class IDSBlockchain:
             print("[Chain] Sync rejected — peer chain not longer than ours")
             return False
 
-        # Reconstruct Block objects from dicts
+        # Reconstruct Block objects from dicts (no hash recompute inside from_dict)
         new_chain: List[Block] = []
         for d in block_dicts:
             try:
@@ -599,7 +790,7 @@ class IDSBlockchain:
             print("[Chain] Sync rejected — invalid genesis block")
             return False
 
-        # Validate every link and hash
+        # Validate every link AND hash (peer chain is untrusted)
         for i in range(1, len(new_chain)):
             cur  = new_chain[i]
             prev = new_chain[i - 1]
@@ -612,12 +803,23 @@ class IDSBlockchain:
                 print(f"[Chain] Sync rejected — broken link at block {i}")
                 return False
 
-            if cur.block_hash != cur.calculate_hash():
-                print(f"[Chain] Sync rejected — invalid hash at block {i}")
+            # Recompute hash to detect tampering — this is safe because
+            # from_dict() stores the hash but doesn't recompute it; we do
+            # so explicitly here only for the peer-sync path.
+            recomputed = cur.calculate_hash()
+            if cur.block_hash != recomputed:
+                print(
+                    f"[Chain] Sync rejected — hash mismatch at block {i}: "
+                    f"stored={cur.block_hash[:16]}… computed={recomputed[:16]}…"
+                )
                 return False
 
         # All checks passed — replace chain
         self.chain = new_chain
+
+        last_block = self.chain[-1]
+        self.current_sequence = (getattr(last_block, 'sequence_number', 0) or 0) + 1
+        self.current_view     = getattr(last_block, 'view_number', 0) or 0
 
         # Remove any pending alerts already committed in the new chain
         committed_tx_ids = {
@@ -630,10 +832,27 @@ class IDSBlockchain:
             if a.tx_id not in committed_tx_ids
         ]
 
-        print(f"[Chain] Sync complete — chain length now {len(self.chain)}")
+        print(
+            f"[Chain] Sync complete — chain length {len(self.chain)} | "
+            f"next sequence={self.current_sequence}"
+        )
         return True
 
+    # ------------------------------------------------------------------
+    # Chain validation
+    # ------------------------------------------------------------------
+
     def validate_chain(self) -> bool:
+        """
+        Full in-memory chain validation.
+
+        For each block:
+          - block_number is sequential
+          - previous_hash links correctly to prior block
+          - block_hash matches calculate_hash() (self-consistency check)
+
+        Called by get_statistics() and can be called at any time.
+        """
         if not self.chain:
             return False
 
@@ -642,7 +861,7 @@ class IDSBlockchain:
             return False
 
         for i in range(1, len(self.chain)):
-            cur = self.chain[i]
+            cur  = self.chain[i]
             prev = self.chain[i - 1]
 
             if cur.block_number != i:
@@ -688,16 +907,16 @@ class IDSBlockchain:
         ]
 
     def get_statistics(self) -> Dict[str, Any]:
-        data_blocks = self.chain[1:]
+        data_blocks    = self.chain[1:]
         severity_totals = {"low": 0, "medium": 0, "high": 0, "critical": 0}
         for b in data_blocks:
             if b.severity:
                 severity_totals[b.severity] = severity_totals.get(b.severity, 0) + 1
 
         return {
-            "total_blocks": len(self.chain),
-            "total_alerts": len(data_blocks),
-            "pending_alerts": len(self.pending_alerts),
+            "total_blocks":    len(self.chain),
+            "total_alerts":    len(data_blocks),
+            "pending_alerts":  len(self.pending_alerts),
             "severity_summary": severity_totals,
-            "chain_valid": self.validate_chain(),
+            "chain_valid":     self.validate_chain(),
         }

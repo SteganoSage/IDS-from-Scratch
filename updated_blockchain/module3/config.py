@@ -51,10 +51,3 @@ def get_config(node_id):
     return configs[node_id]
 
 
-
-# wsl
-# cd /mnt/d
-# cd IEEE-Project/
-# cd sample-blockchain-from\ scratch/
-# cd Testing/
-# source venv/bin/activate

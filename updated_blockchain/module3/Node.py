@@ -15,22 +15,29 @@ from module1.BlockChain import Block, PendingBlockPool
 class Node(PBFT_Node, CryptoUtils):
 
     def __init__(self, node_id, port, peers, total_nodes, F, blockchain,
-                 ml_server_url: str = None):
+                 ml_server_url: str = None, db_path: str = None):
         ids_model = self._make_ids_model(ml_server_url) if ml_server_url else None
 
         pool = PendingBlockPool()
         super().__init__(node_id, total_nodes, F, pending_pool=pool,
                          ids_model=ids_model)
 
-        self.node_id   = node_id
-        self.blockchain = blockchain
+        self.node_id     = node_id
+        self.blockchain  = blockchain
         self.peer_client = PeerClient(peers)
-        self.port      = port
-        self.api       = NodeAPI(self)
+        self.port        = port
+        self.api         = NodeAPI(self)
 
-        # ── Crypto ──────────────────────────────────────────────────────
+        # ── Database ─────────────────────────────────────────────────────
+        # Each node owns its own SQLite file — decentralized persistence.
+        # No shared DB — consistent with blockchain's decentralization principle.
+        from module4.db import NodeDB
+        db_file  = db_path or f"data/node{node_id}.db"
+        self.db  = NodeDB(db_file)
+
+        # ── Crypto ───────────────────────────────────────────────────────
         self.private_key, self.public_key = self.generate_keypair()
-        self.node_address = self.public_key_to_address(self.public_key)
+        self.node_address  = self.public_key_to_address(self.public_key)
         self.dh_private_key, self.dh_public_key = self.generate_dh_keypair()
 
         self.peer_public_keys: dict = {}
@@ -38,9 +45,9 @@ class Node(PBFT_Node, CryptoUtils):
         self.session_keys:     dict = {}
         self.is_secure = False
 
-        # ── Validator reputation ─────────────────────────────────────────
-        self.alert_votes: dict = defaultdict(dict)
-        self.node_stats:  dict = defaultdict(lambda: {"correct": 0, "wrong": 0})
+        # ── Validator reputation ──────────────────────────────────────────
+        self.alert_votes:  dict = defaultdict(dict)
+        self.node_stats:   dict = defaultdict(lambda: {"correct": 0, "wrong": 0})
         self.alert_counter   = 0
         self.WRITE_THRESHOLD = 5
 
@@ -111,7 +118,7 @@ class Node(PBFT_Node, CryptoUtils):
 
     def get_dh_public(self) -> dict:
         return {
-            "node_id":      self.node_id,
+            "node_id":       self.node_id,
             "dh_public_key": self.dh_public_key.to_string().hex(),
         }
 
@@ -170,9 +177,7 @@ class Node(PBFT_Node, CryptoUtils):
                       f"in pool — skipping propose")
                 return
 
-        # Don't let the pool grow unbounded — if too many blocks are already
-        # waiting, drop this alert. The IDS will generate a fresh alert
-        # for the same flow on the next detection cycle anyway.
+        # Don't let the pool grow unbounded
         MAX_POOL_SIZE = 10
         if self.pending_pool.size() >= MAX_POOL_SIZE:
             print(f"[Node {self.node_id}] Pool full ({MAX_POOL_SIZE} blocks) "
@@ -268,10 +273,6 @@ class Node(PBFT_Node, CryptoUtils):
             if bh and voter is not None:
                 self.alert_votes[bh][voter] = True
 
-        # ── CRITICAL FIX: use receive_message() not Receive() ─────────────
-        # The old PBFT had Receive() which returned a response message.
-        # The new PBFT uses receive_message() which handles everything
-        # internally and calls On_Block_Committed() directly as a hook.
         self.receive_message(pbft_msg)
 
     # ── Consensus callback (PBFT hook) ────────────────────────────────────
@@ -294,7 +295,10 @@ class Node(PBFT_Node, CryptoUtils):
             print(f"[Node {self.node_id}] ✓ Block {block.block_number} committed "
                   f"| {block.alert_type} | {block.severity}")
 
-            # Write raw features to DB after confirmed commit
+            # Persist block to DB — survives node restarts
+            self.db.save_block(block)
+
+            # Write raw features to off-chain DB after confirmed commit
             if block.alert and block.alert.tx_id:
                 raw_features = self._pending_features.pop(block.alert.tx_id, None)
                 if raw_features:
@@ -339,7 +343,6 @@ class Node(PBFT_Node, CryptoUtils):
         """
         Checks every 5s for blocks stuck in pool past POOL_TIMEOUT.
         All timed-out blocks are dropped — no re-queuing.
-        The IDS will generate a fresh alert on the next detection cycle.
         """
         while True:
             time.sleep(5)
@@ -395,23 +398,20 @@ class Node(PBFT_Node, CryptoUtils):
     def _store_features(self, tx_id: str, block_number: int,
                         features: dict) -> None:
         """
-        Write raw flow features to off-chain storage.
-        Currently appends to flow_features.jsonl — swap body for real DB.
-        tx_id links this record back to the on-chain block.
+        Write raw CIC-IDS flow features to off-chain SQLite DB.
+        Only called after block is confirmed on chain.
+        Linked back to on-chain block via tx_id.
         """
-        import json as _json
-        record = {
-            "tx_id":        tx_id,
-            "block_number": block_number,
-            "node_id":      self.node_id,
-            "features":     features,
-        }
-        try:
-            with open("flow_features.jsonl", "a") as f:
-                f.write(_json.dumps(record) + "\n")
+        success = self.db.save_features(
+            tx_id        = tx_id,
+            block_number = block_number,
+            node_id      = str(self.node_id),
+            features     = features,
+        )
+        if success:
             print(f"[Node {self.node_id}] 💾 Features stored tx={tx_id[:12]}…")
-        except OSError as e:
-            print(f"[Node {self.node_id}] Feature storage failed: {e}")
+        else:
+            print(f"[Node {self.node_id}] ✗ Feature storage failed tx={tx_id[:12]}…")
 
     # ── Background stats writer ───────────────────────────────────────────
 
@@ -431,6 +431,11 @@ class Node(PBFT_Node, CryptoUtils):
         """
         Before joining consensus, download the longest valid chain from peers.
         Runs in parallel — asks all peers for length, downloads from the best.
+
+        Note: replace_chain() (called here via blockchain.replace_chain) expects
+        the full chain including genesis as the first element.  The /sync/chain
+        endpoint on peers provides this automatically because it serialises
+        self.blockchain.chain which always starts with genesis.
         """
         print(f"[Node {self.node_id}] Syncing chain from peers...")
 
@@ -479,6 +484,10 @@ class Node(PBFT_Node, CryptoUtils):
             print(f"[Node {self.node_id}] Download failed — starting fresh")
             return
 
+        # block_dicts from a peer includes genesis as element 0 because
+        # NodeAPI.sync_chain serialises the full self.blockchain.chain.
+        # replace_chain() handles the full-hash verification for untrusted
+        # peer-sourced blocks.
         success = self.blockchain.replace_chain(block_dicts)
         if success:
             print(f"[Node {self.node_id}] ✓ Chain synced — "
@@ -491,13 +500,64 @@ class Node(PBFT_Node, CryptoUtils):
 
     def start(self) -> None:
         # Start peer handshake in background so Flask can start immediately.
-        # We only try each peer ONCE here — if they're up, great.
-        # If they're not up yet, they will contact us when they start,
-        # and our /dh endpoint will do a reverse DH exchange back to them.
         threading.Thread(target=self._connect_peers, daemon=True).start()
 
         # Start Flask — this blocks, so it must be last
         self.api.start(self.port)
+
+    def _load_chain_from_db(self) -> None:
+        """
+        Restore chain from local SQLite DB on startup.
+
+        Called before _sync_chain() so we only download missed blocks
+        from peers rather than the full chain from genesis.
+
+        Key design decisions
+        --------------------
+        1. Calls db.verify_chain_integrity() first — a fast raw-SQL linkage
+           check that detects DB corruption without constructing any Block
+           objects.  If this fails, we skip the load and start from genesis.
+
+        2. Calls blockchain.load_chain_from_db() (NOT replace_chain()).
+           load_chain_from_db() is the trusted DB path:
+             - Does NOT enforce "must be longer than current chain"
+               (replace_chain() would reject a 1-block DB because the chain
+               already has genesis, making lengths equal)
+             - Does NOT recompute hashes — trusts the stored block_hash
+             - Only validates linkage (previous_hash chain)
+             - Stitches DB blocks onto the existing in-memory genesis;
+               genesis is never stored in the DB so it is never in block_dicts
+
+        3. After load, _sync_chain() will download any blocks missed while
+           this node was offline.  replace_chain() (used by _sync_chain) DOES
+           recompute hashes because peer-sourced blocks are untrusted.
+        """
+        # Step 1: fast integrity check on raw DB rows
+        if not self.db.verify_chain_integrity():
+            print(
+                f"[Node {self.node_id}] DB integrity check failed — "
+                f"skipping DB load, starting from genesis"
+            )
+            return
+
+        # Step 2: load block dicts (block_number >= 1; genesis excluded)
+        block_dicts = self.db.load_all_blocks()
+        if not block_dicts:
+            print(f"[Node {self.node_id}] No blocks in DB — starting from genesis")
+            return
+
+        # Step 3: restore via the trusted DB path (no hash recompute)
+        success = self.blockchain.load_chain_from_db(block_dicts)
+        if success:
+            print(
+                f"[Node {self.node_id}] ✓ Chain restored from DB — "
+                f"at block {len(self.blockchain.chain) - 1}"
+            )
+        else:
+            print(
+                f"[Node {self.node_id}] ✗ DB chain invalid — "
+                f"starting from genesis"
+            )
 
     def _connect_peers(self) -> None:
         """
@@ -528,11 +588,17 @@ class Node(PBFT_Node, CryptoUtils):
                 print(f"[Node {self.node_id}] Peer {peer_id} not up yet "
                       f"— will connect when they join")
 
-        # Sync chain from whoever responded
+        # 1. Restore chain from local DB (fast, no network, no hash recompute)
+        self._load_chain_from_db()
+
+        # 2. Sync with peers to get any blocks missed while offline
+        #    (uses replace_chain which does full hash verification)
         self._sync_chain()
 
         # Ready to participate in consensus
         self.is_secure = True
-        print(f"[Node {self.node_id}] ✓ Secure — "
-              f"{len(self.session_keys)} peers | "
-              f"chain at block {len(self.blockchain.chain) - 1}")
+        print(
+            f"[Node {self.node_id}] ✓ Secure — "
+            f"{len(self.session_keys)} peers | "
+            f"chain at block {len(self.blockchain.chain) - 1}"
+        )

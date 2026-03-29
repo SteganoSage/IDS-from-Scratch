@@ -188,7 +188,7 @@ def get_chain(node_url):
 def test_level_1():
     section("LEVEL 1 — Blockchain node alone")
 
-    node_url = NODE_URLS[0]
+    node_url = NODE_URLS[2]
 
     # 1.1 Health check
     up = is_up(node_url)
@@ -547,5 +547,6 @@ if __name__ == "__main__":
 
 
 # cd /mnt/f
+# cd updated_IEEE_project
 # cd updated_blockchain/
 # source \venv/bin/activate
