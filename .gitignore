@@ -51,7 +51,10 @@ xgb_*.pkl
 data/
 *.log
 ids_alerts.log
-
+updated_blockchain/database/
+*.db
+*.shm
+*.wal
 # =========================
 # 🧪 Temporary / Testing Outputs
 # =========================
