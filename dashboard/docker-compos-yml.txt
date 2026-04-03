@@ -1,0 +1,32 @@
+# ── ADD THIS SERVICE to your docker-compose.yml ───────────────────────────────
+# Paste the block below into the `services:` section of your existing
+# docker-compose.yml, alongside ml-server and blockchain-node-* services.
+# ──────────────────────────────────────────────────────────────────────────────
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    image: fusionids/dashboard:latest
+    container_name: fusionids-dashboard
+    restart: unless-stopped
+    depends_on:
+      ml-server:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - ids-net
+
+# ── Then open http://localhost:3000 in your browser ───────────────────────────
+#
+# The nginx reverse proxy inside the dashboard container routes:
+#   /api/ml/*  → ml-server:8000  (SSE stream + health)
+#   /api/bc0/* → blockchain-node-0:5000  (PBFT events + health)
+#
+# This means the dashboard never needs to know the host IP — everything
+# resolves through docker-compose service names inside ids-net.
+#
+# For the demo, DEMO_MODE=true is set in index.html by default so it
+# runs with simulated data even before backends are wired up.
+# When your backends have the SSE endpoints, set DEMO_MODE=false.

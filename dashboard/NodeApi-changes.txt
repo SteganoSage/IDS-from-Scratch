@@ -1,0 +1,114 @@
+# ── ADD THIS TO NodeApi.py ────────────────────────────────────────────────────
+# 1. Add this import at the top of NodeApi.py:
+#
+#   import queue, json, threading
+#   from flask import Response
+#
+# 2. Add the SSE queue and helper just below the NodeAPI.__init__ definition.
+# 3. Register the /events route inside _register_routes().
+# 4. Call push_pbft_event() from your PBFT message handlers in Node.py.
+#
+# Paste the code below inside the NodeAPI class.
+# ──────────────────────────────────────────────────────────────────────────────
+
+import queue
+import json
+import threading
+from flask import Response
+
+# ── Inside NodeAPI.__init__, add after self._register_routes(): ───────────────
+#
+#   self._sse_listeners: list[queue.Queue] = []
+#   self._sse_lock = threading.Lock()
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Add these two methods to the NodeAPI class: ───────────────────────────────
+
+def push_pbft_event(self, phase: str, from_node: int, to_nodes: list, alert_type: str = "") -> None:
+    """
+    Broadcast a PBFT phase transition to all connected SSE clients.
+
+    Call this from Node.py at each PBFT phase transition:
+        self.api.push_pbft_event('pre-prepare', self.node_id, list(peers), alert_type)
+        self.api.push_pbft_event('prepare',     self.node_id, list(peers), alert_type)
+        self.api.push_pbft_event('commit',      self.node_id, list(peers), alert_type)
+        self.api.push_pbft_event('block',       self.node_id, [],          alert_type)
+    """
+    data = json.dumps({
+        "phase":      phase,
+        "from_node":  from_node,
+        "to_nodes":   to_nodes,
+        "alert_type": alert_type,
+    })
+    with self._sse_lock:
+        dead = []
+        for q in self._sse_listeners:
+            try:
+                q.put_nowait(data)
+            except queue.Full:
+                dead.append(q)
+        for q in dead:
+            self._sse_listeners.remove(q)
+
+
+# ── Add this route inside _register_routes(): ─────────────────────────────────
+
+# Place this block inside NodeAPI._register_routes(), alongside the other routes:
+
+"""
+@self.app.route("/events", methods=["GET"])
+def sse_events():
+    '''
+    Server-Sent Events — streams PBFT phase transitions to the dashboard.
+    The dashboard opens:  new EventSource('http://localhost:5000/events')
+    '''
+    from flask import request as flask_request
+
+    def generate():
+        q = queue.Queue(maxsize=50)
+        with self._sse_lock:
+            self._sse_listeners.append(q)
+        try:
+            yield ': connected\\n\\n'        # initial handshake comment
+            while True:
+                try:
+                    data = q.get(timeout=15)
+                    yield f'data: {data}\\n\\n'
+                except queue.Empty:
+                    yield ': ping\\n\\n'     # keep-alive
+        except GeneratorExit:
+            pass
+        finally:
+            with self._sse_lock:
+                if q in self._sse_listeners:
+                    self._sse_listeners.remove(q)
+
+    resp = Response(generate(), mimetype='text/event-stream')
+    resp.headers['Cache-Control']     = 'no-cache'
+    resp.headers['X-Accel-Buffering'] = 'no'
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    return resp
+"""
+
+# ── How to call push_pbft_event from Node.py ─────────────────────────────────
+#
+# In your PBFT consensus handler (wherever you call Send_To_All_Nodes),
+# add one line per phase. For example:
+#
+#   # When leader sends PRE-PREPARE:
+#   self.api.push_pbft_event('pre-prepare', self.node_id, list(self.peers.keys()), alert_type)
+#
+#   # When a node sends PREPARE after verifying:
+#   self.api.push_pbft_event('prepare', self.node_id, list(self.peers.keys()), alert_type)
+#
+#   # When a node sends COMMIT after 2f+1 prepares:
+#   self.api.push_pbft_event('commit', self.node_id, list(self.peers.keys()), alert_type)
+#
+#   # When block is committed:
+#   self.api.push_pbft_event('block', self.node_id, [], alert_type)
+#
+# Note: self.api must be a reference to the NodeAPI instance.
+# In Node.py, after creating NodeAPI, store: self.api = NodeAPI(self)
+# Then NodeAPI stores self.node = node, so you can also do:
+#   node.node_api.push_pbft_event(...)

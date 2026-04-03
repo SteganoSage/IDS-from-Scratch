@@ -1,0 +1,103 @@
+# ── ADD THIS TO ml_server.py ──────────────────────────────────────────────────
+# Drop these imports at the top of ml_server.py:
+#
+#   import asyncio
+#   import json
+#   from fastapi import Request
+#   from fastapi.responses import StreamingResponse
+#   from fastapi.middleware.cors import CORSMiddleware
+#
+# Then add the CORS middleware right after `app = FastAPI(...)`:
+#
+#   app.add_middleware(
+#       CORSMiddleware,
+#       allow_origins=["*"],   # tighten in production
+#       allow_methods=["*"],
+#       allow_headers=["*"],
+#   )
+#
+# Then paste the code below anywhere BEFORE the __main__ block.
+# ──────────────────────────────────────────────────────────────────────────────
+
+import asyncio
+import json
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+# ── SSE event queue (one global queue, all connected dashboards share it) ──────
+_sse_queue: asyncio.Queue = asyncio.Queue(maxsize=200)
+
+
+def push_sse_event(data: dict) -> None:
+    """
+    Call this from predict() / validate() to push events to the dashboard.
+    Non-blocking — drops the event silently if the queue is full.
+    """
+    try:
+        _sse_queue.put_nowait(data)
+    except asyncio.QueueFull:
+        pass
+
+
+async def _sse_generator(request: Request):
+    """
+    Async generator that yields Server-Sent Events to the dashboard.
+    Keeps the connection alive with a comment ping every 15 s.
+    """
+    ping_interval = 15  # seconds between keep-alive pings
+    last_ping     = asyncio.get_event_loop().time()
+
+    while True:
+        if await request.is_disconnected():
+            break
+
+        now = asyncio.get_event_loop().time()
+
+        try:
+            # Wait up to 1 s for a new event
+            event = await asyncio.wait_for(_sse_queue.get(), timeout=1.0)
+            payload = json.dumps(event)
+
+            # Use a named event type so the dashboard can filter
+            if event.get("alert"):
+                yield f"event: alert\ndata: {payload}\n\n"
+            else:
+                yield f"data: {payload}\n\n"
+
+        except asyncio.TimeoutError:
+            # Send keep-alive ping if needed
+            if now - last_ping >= ping_interval:
+                yield ": ping\n\n"
+                last_ping = now
+
+
+@app.get("/stream")
+async def stream_events(request: Request):
+    """
+    Server-Sent Events endpoint consumed by the dashboard.
+    The dashboard opens:  new EventSource('http://localhost:8000/stream')
+    Each prediction result is broadcast as an SSE message.
+    """
+    return StreamingResponse(
+        _sse_generator(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",   # disable nginx buffering
+        },
+    )
+
+
+# ── PATCH predict() to push to SSE ────────────────────────────────────────────
+# Inside your existing predict() route, right before the `return PredictResponse(...)`
+# add ONE line:
+#
+#     push_sse_event({
+#         "signature":  result["signature"],
+#         "anomaly":    result["anomaly"],
+#         "alert":      alert,
+#         "meta":       req.meta,
+#         "latency_ms": round(latency_ms, 3),
+#     })
+#
+# That's it. The SSE stream will broadcast every prediction to the dashboard.

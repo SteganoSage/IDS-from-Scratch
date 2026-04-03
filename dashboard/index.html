@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FusionIDS — Live Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0a0c10;
+    --bg2:       #10131a;
+    --bg3:       #161b25;
+    --border:    rgba(255,255,255,0.07);
+    --border2:   rgba(255,255,255,0.13);
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --blue:      #3b82f6;
+    --blue-dim:  rgba(59,130,246,0.15);
+    --green:     #22c55e;
+    --green-dim: rgba(34,197,94,0.12);
+    --red:       #ef4444;
+    --red-dim:   rgba(239,68,68,0.12);
+    --amber:     #f59e0b;
+    --amber-dim: rgba(245,158,11,0.12);
+    --purple:    #a855f7;
+    --purple-dim:rgba(168,85,247,0.12);
+    --teal:      #14b8a6;
+    --teal-dim:  rgba(20,184,166,0.12);
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    height: 48px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-shrink: 0;
+  }
+  .logo {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--blue);
+    letter-spacing: 0.04em;
+  }
+  .live-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--red);
+    letter-spacing: 0.08em;
+  }
+  .live-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--red);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .header-stats {
+    display: flex;
+    gap: 24px;
+    margin-left: auto;
+  }
+  .hstat { text-align: right; }
+  .hstat-val {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .hstat-label {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .svc-dots { display: flex; gap: 8px; align-items: center; }
+  .svc-dot-wrap { display: flex; align-items: center; gap: 5px; }
+  .svc-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.4s;
+  }
+  .svc-dot.ok { background: var(--green); }
+  .svc-dot.err { background: var(--red); }
+  .svc-name { font-size: 10px; color: var(--muted); }
+
+  /* ── Main grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 320px 340px;
+    grid-template-rows: 1fr;
+    gap: 1px;
+    background: var(--border);
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .panel {
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-shrink: 0;
+  }
+  .panel-icon {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .panel-count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ── Panel 1: Packet flow canvas ── */
+  #flow-canvas {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .flow-legend {
+    display: flex;
+    gap: 14px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .legend-label { font-size: 10px; color: var(--muted); }
+
+  /* ── Panel 2: ML feed ── */
+  #ml-feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  #ml-feed::-webkit-scrollbar { width: 4px; }
+  #ml-feed::-webkit-scrollbar-track { background: transparent; }
+  #ml-feed::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .flow-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 11px;
+    animation: slideIn 0.2s ease;
+    flex-shrink: 0;
+  }
+  @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+
+  .flow-card.alert {
+    border-color: rgba(239,68,68,0.35);
+    background: rgba(239,68,68,0.06);
+  }
+  .flow-card.warning {
+    border-color: rgba(245,158,11,0.3);
+    background: rgba(245,158,11,0.05);
+  }
+
+  .fc-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .label-chip {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+  }
+  .chip-benign  { background: var(--green-dim);  color: var(--green); }
+  .chip-alert   { background: var(--red-dim);    color: var(--red); }
+  .chip-warning { background: var(--amber-dim);  color: var(--amber); }
+
+  .fc-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 5px;
+  }
+  .conf-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .conf-bar-bg {
+    flex: 1;
+    height: 3px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .conf-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+  .conf-val {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    min-width: 30px;
+    text-align: right;
+  }
+  .latency-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+
+  /* ── Panel 3: PBFT graph ── */
+  #pbft-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  #pbft-svg-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    position: relative;
+  }
+
+  #pbft-svg { width: 100%; height: 100%; }
+
+  .phase-log {
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    height: 140px;
+    overflow-y: auto;
+    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .phase-log::-webkit-scrollbar { width: 3px; }
+  .phase-log::-webkit-scrollbar-thumb { background: var(--border2); }
+
+  .phase-entry {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 10px;
+    animation: slideIn 0.2s ease;
+  }
+  .phase-time { font-family: var(--mono); color: var(--muted); flex-shrink: 0; }
+  .phase-pill {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    letter-spacing: 0.05em;
+  }
+  .pill-pre-prepare { background: var(--blue-dim);   color: var(--blue); }
+  .pill-prepare     { background: var(--amber-dim);  color: var(--amber); }
+  .pill-commit      { background: var(--purple-dim); color: var(--purple); }
+  .pill-block       { background: var(--green-dim);  color: var(--green); }
+  .pill-alert       { background: var(--red-dim);    color: var(--red); }
+  .phase-msg { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .phase-msg strong { color: var(--text); }
+
+  /* Block counter */
+  .block-counter {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg2);
+    flex-shrink: 0;
+  }
+  .bc-label { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+  .bc-val { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--green); }
+
+  /* Node state colors on SVG */
+  .node-idle     { fill: #1e2736; stroke: #2d3a50; }
+  .node-active   { fill: #1a2a3a; stroke: var(--blue); }
+  .node-prepare  { fill: #2a2010; stroke: var(--amber); }
+  .node-commit   { fill: #1f1030; stroke: var(--purple); }
+  .node-done     { fill: #0d2218; stroke: var(--green); }
+  .node-leader   { fill: #0f1e30; stroke: var(--blue); }
+
+  .node-label    { fill: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+  .node-sublabel { fill: #64748b;    font-family: 'JetBrains Mono', monospace; font-size: 9px; }
+
+  .msg-arrow {
+    stroke-width: 1.5;
+    fill: none;
+    stroke-dasharray: 180;
+    stroke-dashoffset: 180;
+  }
+
+  @keyframes drawArrow {
+    to { stroke-dashoffset: 0; }
+  }
+  @keyframes fadeArrow {
+    0%   { opacity: 1; }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .no-data-msg {
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">FUSIONIDS</span>
+  <div class="live-badge"><span class="live-dot"></span>LIVE</div>
+
+  <div class="svc-dots">
+    <div class="svc-dot-wrap"><div class="svc-dot" id="dot-capturer"></div><span class="svc-name">Capturer</span></div>
+    <div class="svc-dot-wrap"><div class="svc-dot" id="dot-ml"></div><span class="svc-name">ML</span></div>
+    <div class="svc-dot-wrap"><div class="svc-dot" id="dot-bc0"></div><span class="svc-name">Node 0</span></div>
+    <div class="svc-dot-wrap"><div class="svc-dot" id="dot-bc1"></div><span class="svc-name">Node 1</span></div>
+    <div class="svc-dot-wrap"><div class="svc-dot" id="dot-bc2"></div><span class="svc-name">Node 2</span></div>
+    <div class="svc-dot-wrap"><div class="svc-dot" id="dot-bc3"></div><span class="svc-name">Node 3</span></div>
+  </div>
+
+  <div class="header-stats">
+    <div class="hstat">
+      <div class="hstat-val" id="stat-flows">0</div>
+      <div class="hstat-label">Flows</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-val" id="stat-alerts" style="color:var(--red)">0</div>
+      <div class="hstat-label">Alerts</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-val" id="stat-blocks" style="color:var(--green)">0</div>
+      <div class="hstat-label">Blocks</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-val" id="stat-lat">—</div>
+      <div class="hstat-label">Avg ms</div>
+    </div>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- ── Panel 1: Packet flow canvas ── -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-icon" style="background:var(--blue)"></div>
+      <span class="panel-title">Packet Flow</span>
+      <span class="panel-count" id="pkt-count">0 pkts</span>
+    </div>
+    <div id="flow-canvas">
+      <canvas id="canvas"></canvas>
+    </div>
+    <div class="flow-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div><span class="legend-label">Benign</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--amber)"></div><span class="legend-label">Suspicious</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div><span class="legend-label">Attack</span></div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div><span class="legend-label">Unclassified</span></div>
+    </div>
+  </div>
+
+  <!-- ── Panel 2: ML prediction feed ── -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-icon" style="background:var(--purple)"></div>
+      <span class="panel-title">ML Predictions</span>
+      <span class="panel-count" id="ml-count">0</span>
+    </div>
+    <div id="ml-feed">
+      <div class="no-data-msg" id="ml-empty">Waiting for flows…</div>
+    </div>
+  </div>
+
+  <!-- ── Panel 3: PBFT consensus ── -->
+  <div class="panel">
+    <div class="panel-header">
+      <div class="panel-icon" style="background:var(--teal)"></div>
+      <span class="panel-title">PBFT Consensus</span>
+    </div>
+    <div id="pbft-panel">
+      <div id="pbft-svg-wrap">
+        <svg id="pbft-svg" viewBox="0 0 300 260" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5"
+                    markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+                    stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+          </defs>
+
+          <!-- Background grid lines (subtle) -->
+          <line x1="150" y1="20" x2="150" y2="240" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+          <line x1="20"  y1="130" x2="280" y2="130" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+
+          <!-- Arrow layer (drawn dynamically) -->
+          <g id="arrow-layer"></g>
+
+          <!-- Node 0 — top center (leader) -->
+          <g id="node-0">
+            <rect x="113" y="20" width="74" height="46" rx="8" class="node-leader" stroke-width="1.2"/>
+            <text x="150" y="40" text-anchor="middle" class="node-label">Node 0</text>
+            <text x="150" y="54" text-anchor="middle" class="node-sublabel" id="node-0-label">LEADER</text>
+          </g>
+
+          <!-- Node 1 — right -->
+          <g id="node-1">
+            <rect x="218" y="102" width="74" height="46" rx="8" class="node-idle" stroke-width="1"/>
+            <text x="255" y="122" text-anchor="middle" class="node-label">Node 1</text>
+            <text x="255" y="136" text-anchor="middle" class="node-sublabel" id="node-1-label">idle</text>
+          </g>
+
+          <!-- Node 2 — bottom right -->
+          <g id="node-2">
+            <rect x="168" y="194" width="74" height="46" rx="8" class="node-idle" stroke-width="1"/>
+            <text x="205" y="214" text-anchor="middle" class="node-label">Node 2</text>
+            <text x="205" y="228" text-anchor="middle" class="node-sublabel" id="node-2-label">idle</text>
+          </g>
+
+          <!-- Node 3 — bottom left -->
+          <g id="node-3">
+            <rect x="58" y="194" width="74" height="46" rx="8" class="node-idle" stroke-width="1"/>
+            <text x="95" y="214" text-anchor="middle" class="node-label">Node 3</text>
+            <text x="95" y="228" text-anchor="middle" class="node-sublabel" id="node-3-label">idle</text>
+          </g>
+
+          <!-- Node 4 (optional) hidden by default -->
+          <!-- ML Server indicator -->
+          <g id="ml-node">
+            <rect x="8" y="102" width="74" height="46" rx="8"
+                  fill="#0f1a2e" stroke="rgba(168,85,247,0.4)" stroke-width="1" stroke-dasharray="4 3"/>
+            <text x="45" y="122" text-anchor="middle" class="node-label" style="fill:#a855f7;font-size:10px">ML Server</text>
+            <text x="45" y="136" text-anchor="middle" class="node-sublabel" id="ml-status-label">:8000</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="block-counter">
+        <span class="bc-label">Blocks committed</span>
+        <span class="bc-val" id="bc-count">0</span>
+      </div>
+
+      <div class="phase-log" id="phase-log">
+        <div class="phase-entry">
+          <span class="phase-time">--:--:--</span>
+          <span class="phase-pill pill-alert">SYSTEM</span>
+          <span class="phase-msg">Waiting for blockchain events…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  CONFIG — edit these to match your docker-compose setup
+// ═══════════════════════════════════════════════════════════
+const ML_URL  = window.ML_SERVER_URL  || 'http://localhost:8000';
+const BC_URLS = [
+  window.BC0_URL || 'http://localhost:5000',
+  window.BC1_URL || 'http://localhost:5001',
+  window.BC2_URL || 'http://localhost:5002',
+  window.BC3_URL || 'http://localhost:5003',
+];
+
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let totalFlows  = 0;
+let totalAlerts = 0;
+let totalBlocks = 0;
+let latencies   = [];
+let pktCount    = 0;
+let mlCount     = 0;
+
+// ═══════════════════════════════════════════════════════════
+//  CANVAS — animated packet particles
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+let   W, H;
+const particles = [];
+
+const COLORS = {
+  benign:   '#22c55e',
+  alert:    '#ef4444',
+  warning:  '#f59e0b',
+  default:  '#3b82f6',
+};
+
+function resizeCanvas() {
+  const wrap = document.getElementById('flow-canvas');
+  W = canvas.width  = wrap.clientWidth;
+  H = canvas.height = wrap.clientHeight;
+}
+
+class Particle {
+  constructor(label) {
+    const side = Math.floor(Math.random() * 2); // 0=left, 1=top
+    if (side === 0) {
+      this.x  = 0;
+      this.y  = Math.random() * H;
+      this.vx = 1.2 + Math.random() * 2;
+      this.vy = (Math.random() - 0.5) * 1.5;
+    } else {
+      this.x  = Math.random() * W;
+      this.y  = 0;
+      this.vx = (Math.random() - 0.5) * 1.5;
+      this.vy = 1.2 + Math.random() * 2;
+    }
+    this.label  = label;
+    this.color  = COLORS[label] || COLORS.default;
+    this.r      = label === 'alert' ? 5 : 3.5;
+    this.alpha  = 1;
+    this.trail  = [];
+    this.age    = 0;
+    this.maxAge = 120 + Math.random() * 80;
+  }
+
+  update() {
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > 12) this.trail.shift();
+    this.x   += this.vx;
+    this.y   += this.vy;
+    this.age++;
+    if (this.age > this.maxAge * 0.7) {
+      this.alpha = 1 - (this.age - this.maxAge * 0.7) / (this.maxAge * 0.3);
+    }
+  }
+
+  draw() {
+    // Trail
+    for (let i = 0; i < this.trail.length; i++) {
+      const a = (i / this.trail.length) * 0.3 * this.alpha;
+      ctx.beginPath();
+      ctx.arc(this.trail[i].x, this.trail[i].y, this.r * (i / this.trail.length) * 0.8, 0, Math.PI * 2);
+      ctx.fillStyle = this.color + Math.floor(a * 255).toString(16).padStart(2, '0');
+      ctx.fill();
+    }
+    // Core
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.fillStyle = this.color + Math.floor(this.alpha * 255).toString(16).padStart(2, '0');
+    ctx.fill();
+    // Glow on alerts
+    if (this.label === 'alert') {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r + 4, 0, Math.PI * 2);
+      ctx.fillStyle = this.color + '22';
+      ctx.fill();
+    }
+  }
+
+  dead() { return this.age > this.maxAge || this.x > W + 20 || this.y > H + 20 || this.x < -20; }
+}
+
+// Background grid
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+  ctx.lineWidth   = 0.5;
+  const step = 40;
+  for (let x = 0; x < W; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+}
+
+// Scan line effect
+let scanY = 0;
+function drawScan() {
+  scanY = (scanY + 0.3) % H;
+  const grad = ctx.createLinearGradient(0, scanY - 20, 0, scanY + 20);
+  grad.addColorStop(0, 'rgba(59,130,246,0)');
+  grad.addColorStop(0.5, 'rgba(59,130,246,0.04)');
+  grad.addColorStop(1, 'rgba(59,130,246,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, scanY - 20, W, 40);
+}
+
+function loop() {
+  ctx.clearRect(0, 0, W, H);
+  drawGrid();
+  drawScan();
+  for (let i = particles.length - 1; i >= 0; i--) {
+    particles[i].update();
+    particles[i].draw();
+    if (particles[i].dead()) particles.splice(i, 1);
+  }
+  // Ambient idle particles when no real data
+  if (Math.random() < 0.04) spawnParticle('default');
+  requestAnimationFrame(loop);
+}
+
+function spawnParticle(label) {
+  if (particles.length < 120) {
+    particles.push(new Particle(label));
+    pktCount++;
+    document.getElementById('pkt-count').textContent = pktCount + ' pkts';
+  }
+}
+
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+loop();
+
+// ═══════════════════════════════════════════════════════════
+//  ML FEED
+// ═══════════════════════════════════════════════════════════
+function labelToType(label) {
+  if (!label) return 'default';
+  const l = label.toLowerCase();
+  if (l === 'benign') return 'benign';
+  if (['ddos','dos','bot','bruteforce','sql injection','xss','infiltration'].some(x => l.includes(x))) return 'alert';
+  return 'warning';
+}
+
+function addMLCard(data) {
+  const empty = document.getElementById('ml-empty');
+  if (empty) empty.remove();
+
+  const sig     = data.signature || {};
+  const label   = sig.label_name || 'Unknown';
+  const conf    = sig.confidence  || 0;
+  const lat     = data.latency_ms || 0;
+  const meta    = data.meta       || {};
+  const type    = labelToType(label);
+
+  const chipClass = type === 'benign' ? 'chip-benign' : type === 'alert' ? 'chip-alert' : 'chip-warning';
+  const barColor  = type === 'benign' ? 'var(--green)' : type === 'alert' ? 'var(--red)' : 'var(--amber)';
+  const confPct   = Math.round(conf * 100);
+
+  const src = meta.src_ip ? `${meta.src_ip}:${meta.src_port || '?'}` : '?.?.?.?';
+  const dst = meta.dst_ip ? `${meta.dst_ip}:${meta.dst_port || '?'}` : '?.?.?.?';
+
+  const card = document.createElement('div');
+  card.className = `flow-card ${type === 'alert' ? 'alert' : type === 'warning' ? 'warning' : ''}`;
+  card.innerHTML = `
+    <div class="fc-top">
+      <span class="label-chip ${chipClass}">${label}</span>
+      <span class="latency-tag">${lat.toFixed(1)}ms</span>
+    </div>
+    <div class="fc-meta">${src} → ${dst}</div>
+    <div class="conf-bar-wrap">
+      <div class="conf-bar-bg">
+        <div class="conf-bar-fill" style="width:${confPct}%;background:${barColor}"></div>
+      </div>
+      <span class="conf-val">${confPct}%</span>
+    </div>`;
+
+  const feed = document.getElementById('ml-feed');
+  feed.insertBefore(card, feed.firstChild);
+
+  // Keep max 60 cards
+  while (feed.children.length > 60) feed.removeChild(feed.lastChild);
+
+  mlCount++;
+  document.getElementById('ml-count').textContent = mlCount;
+
+  // Spawn canvas particle
+  const burst = type === 'alert' ? 6 : type === 'warning' ? 3 : 1;
+  for (let i = 0; i < burst; i++) spawnParticle(type === 'alert' ? 'alert' : type === 'warning' ? 'warning' : 'benign');
+
+  // Update stats
+  totalFlows++;
+  document.getElementById('stat-flows').textContent = totalFlows;
+  if (type !== 'benign') {
+    totalAlerts++;
+    document.getElementById('stat-alerts').textContent = totalAlerts;
+  }
+  latencies.push(lat);
+  if (latencies.length > 100) latencies.shift();
+  const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+  document.getElementById('stat-lat').textContent = avg.toFixed(0);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PBFT VISUALIZER
+// ═══════════════════════════════════════════════════════════
+const NODE_CENTERS = {
+  0: { x: 150, y: 43 },
+  1: { x: 255, y: 125 },
+  2: { x: 205, y: 217 },
+  3: { x: 95,  y: 217 },
+  ml: { x: 45, y: 125 },
+};
+
+const PHASE_COLORS = {
+  'pre-prepare': 'var(--blue)',
+  'prepare':     'var(--amber)',
+  'commit':      'var(--purple)',
+  'block':       'var(--green)',
+  'alert':       'var(--red)',
+};
+
+const PHASE_NODE_CLASS = {
+  'pre-prepare': 'node-active',
+  'prepare':     'node-prepare',
+  'commit':      'node-commit',
+  'block':       'node-done',
+};
+
+let blockCount = 0;
+let resetTimer = null;
+
+function setNodeState(nodeId, state) {
+  const r = document.querySelector(`#node-${nodeId} rect`);
+  if (!r) return;
+  r.className.baseVal = state;
+}
+
+function setNodeLabel(nodeId, text) {
+  const el = document.getElementById(`node-${nodeId}-label`);
+  if (el) el.textContent = text;
+}
+
+function drawArrow(fromId, toId, color, dashed) {
+  const from = NODE_CENTERS[fromId];
+  const to   = NODE_CENTERS[toId];
+  if (!from || !to) return;
+
+  const layer = document.getElementById('arrow-layer');
+  const line  = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', from.x);
+  line.setAttribute('y1', from.y);
+  line.setAttribute('x2', to.x);
+  line.setAttribute('y2', to.y);
+  line.setAttribute('stroke', color);
+  line.setAttribute('stroke-width', '1.5');
+  line.setAttribute('fill', 'none');
+  line.setAttribute('marker-end', 'url(#arr)');
+  if (dashed) line.setAttribute('stroke-dasharray', '4 3');
+  line.classList.add('msg-arrow');
+  line.style.animation = 'drawArrow 0.4s ease forwards, fadeArrow 1.8s ease 0.4s forwards';
+  layer.appendChild(line);
+  setTimeout(() => { if (line.parentNode) line.parentNode.removeChild(line); }, 2200);
+}
+
+function addPhaseLog(phase, msg) {
+  const log = document.getElementById('phase-log');
+  const now = new Date();
+  const ts  = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+  const pillClass = `pill-${phase.toLowerCase().replace('-','').replace(' ','-')}`;
+  const entry = document.createElement('div');
+  entry.className = 'phase-entry';
+  entry.innerHTML = `
+    <span class="phase-time">${ts}</span>
+    <span class="phase-pill ${pillClass}">${phase.toUpperCase()}</span>
+    <span class="phase-msg">${msg}</span>`;
+  log.insertBefore(entry, log.firstChild);
+  while (log.children.length > 30) log.removeChild(log.lastChild);
+}
+
+function handlePBFTEvent(ev) {
+  const phase    = (ev.phase || '').toLowerCase();
+  const fromNode = ev.from_node;
+  const toNodes  = ev.to_nodes || [];
+  const alertType = ev.alert_type || '';
+  const color    = PHASE_COLORS[phase] || 'var(--teal)';
+
+  // Animate arrows
+  toNodes.forEach(to => drawArrow(fromNode, to, color, phase === 'prepare'));
+
+  // Update node states
+  const nodeClass = PHASE_NODE_CLASS[phase] || 'node-active';
+  if (fromNode !== undefined) {
+    setNodeState(fromNode, nodeClass);
+    setNodeLabel(fromNode, phase);
+  }
+  toNodes.forEach(n => {
+    setNodeState(n, nodeClass);
+    setNodeLabel(n, 'recv');
+  });
+
+  // Phase-specific logic
+  if (phase === 'block') {
+    blockCount++;
+    document.getElementById('bc-count').textContent = blockCount;
+    document.getElementById('stat-blocks').textContent = blockCount;
+    addPhaseLog('block', `<strong>Block #${blockCount}</strong> committed — ${alertType}`);
+
+    // Flash all nodes green then reset
+    [0,1,2,3].forEach(n => { setNodeState(n, 'node-done'); setNodeLabel(n, 'committed'); });
+    clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => resetNodes(), 3000);
+  } else if (phase === 'pre-prepare') {
+    addPhaseLog('pre-prepare', `Node <strong>${fromNode}</strong> → broadcast ${alertType}`);
+  } else if (phase === 'prepare') {
+    addPhaseLog('prepare', `Node <strong>${fromNode}</strong> → 2f+1 agrees`);
+  } else if (phase === 'commit') {
+    addPhaseLog('commit', `Node <strong>${fromNode}</strong> → committing`);
+  }
+}
+
+function resetNodes() {
+  [1,2,3].forEach(n => { setNodeState(n, 'node-idle'); setNodeLabel(n, 'idle'); });
+  setNodeState(0, 'node-leader'); setNodeLabel(0, 'LEADER');
+}
+
+// ML → node-0 alert arrow
+function showAlertArrow(label) {
+  drawArrow('ml', 0, 'var(--red)', false);
+  addPhaseLog('alert', `<strong>${label}</strong> alert → Node 0`);
+  setNodeState(0, 'node-active'); setNodeLabel(0, 'recv alert');
+  [1,2,3].forEach(n => { setNodeState(n, 'node-idle'); setNodeLabel(n, 'idle'); });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HEALTH POLLING
+// ═══════════════════════════════════════════════════════════
+async function pollHealth(url, dotId) {
+  try {
+    const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+    document.getElementById(dotId).className = `svc-dot ${r.ok ? 'ok' : 'err'}`;
+  } catch {
+    document.getElementById(dotId).className = 'svc-dot err';
+  }
+}
+
+function startHealthPolling() {
+  const poll = () => {
+    pollHealth(ML_URL, 'dot-ml');
+    BC_URLS.forEach((url, i) => pollHealth(url, `dot-bc${i}`));
+    // Capturer has no HTTP endpoint — it's "ok" if ml-server is receiving
+    document.getElementById('dot-capturer').className =
+      document.getElementById('dot-ml').className;
+  };
+  poll();
+  setInterval(poll, 10000);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SERVER-SENT EVENTS — ML stream
+// ═══════════════════════════════════════════════════════════
+function connectMLStream() {
+  const es = new EventSource(`${ML_URL}/stream`);
+  es.onmessage = (e) => {
+    try { addMLCard(JSON.parse(e.data)); } catch {}
+  };
+  es.addEventListener('alert', (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      showAlertArrow(d.alert?.label_name || 'Unknown');
+    } catch {}
+  });
+  es.onerror = () => {
+    setTimeout(connectMLStream, 5000);
+    es.close();
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SERVER-SENT EVENTS — Blockchain nodes
+// ═══════════════════════════════════════════════════════════
+function connectBlockchainStream(url) {
+  const es = new EventSource(`${url}/events`);
+  es.onmessage = (e) => {
+    try { handlePBFTEvent(JSON.parse(e.data)); } catch {}
+  };
+  es.onerror = () => {
+    setTimeout(() => connectBlockchainStream(url), 6000);
+    es.close();
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DEMO MODE — simulates data when backends are unreachable
+//  Remove or comment out the block below for production
+// ═══════════════════════════════════════════════════════════
+const DEMO_MODE = true; // set false when backends are live
+
+const DEMO_LABELS = [
+  { label_name: 'Benign', id: 0 },
+  { label_name: 'Benign', id: 0 },
+  { label_name: 'Benign', id: 0 },
+  { label_name: 'DDoS',   id: 2 },
+  { label_name: 'Benign', id: 0 },
+  { label_name: 'PortScan', id: 5 },
+  { label_name: 'Benign', id: 0 },
+  { label_name: 'Bot',    id: 3 },
+];
+
+function randIp() {
+  return `${Math.floor(Math.random()*200+10)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*255)}.${Math.floor(Math.random()*254+1)}`;
+}
+
+let demoPhase = 0;
+const PBFT_PHASES = ['pre-prepare','prepare','commit','block'];
+
+function runDemo() {
+  // ML flow
+  const sig     = DEMO_LABELS[Math.floor(Math.random() * DEMO_LABELS.length)];
+  const conf    = sig.label_name === 'Benign' ? 0.88 + Math.random()*0.1 : 0.7 + Math.random()*0.25;
+  const lat     = 4 + Math.random()*18;
+  const isAlert = sig.label_name !== 'Benign';
+
+  addMLCard({
+    signature: { label_name: sig.label_name, confidence: conf },
+    anomaly:   { anomaly_score: isAlert ? -0.7 : 0.2 },
+    alert:     isAlert ? { label_name: sig.label_name, severity: 'high', fusion: 'both_agree' } : null,
+    meta:      { src_ip: randIp(), dst_ip: randIp(), src_port: Math.floor(Math.random()*60000+1024), dst_port: [80,443,22,3306][Math.floor(Math.random()*4)], protocol: 6 },
+    latency_ms: lat,
+  });
+
+  // If alert, trigger PBFT sequence
+  if (isAlert) {
+    showAlertArrow(sig.label_name);
+    let step = 0;
+    const pbftInterval = setInterval(() => {
+      if (step >= PBFT_PHASES.length) { clearInterval(pbftInterval); return; }
+      const phase = PBFT_PHASES[step];
+      const toNodes = phase === 'pre-prepare' ? [1,2,3] :
+                      phase === 'prepare'     ? [0,2,3] :
+                      phase === 'commit'      ? [0,1,2,3] : [];
+      handlePBFTEvent({ phase, from_node: 0, to_nodes: toNodes, alert_type: sig.label_name });
+      step++;
+    }, 900);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+startHealthPolling();
+
+if (DEMO_MODE) {
+  // Simulate flows every 1.8s for demo
+  setInterval(runDemo, 1800);
+  setTimeout(runDemo, 200);
+} else {
+  connectMLStream();
+  // Connect to node-0 only for PBFT events (it's the leader)
+  connectBlockchainStream(BC_URLS[0]);
+}
+</script>
+</body>
+</html>
