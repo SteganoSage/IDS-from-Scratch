@@ -8,8 +8,18 @@
 #include <iomanip>
 
 // One sender instance — connects to ml_server.py on localhost:5000
-static FeatureSender g_sender("127.0.0.1", 5000);
+// static FeatureSender g_sender("127.0.0.1", 8000);
 
+static std::string _get_env(const char* name, const char* fallback) {
+    const char* v = std::getenv(name);
+    return v ? std::string(v) : std::string(fallback);
+}
+
+static FeatureSender g_sender(
+    _get_env("ML_SERVER_HOST", "127.0.0.1"),
+    std::stoi(_get_env("ML_SERVER_PORT", "8000"))
+);
+ 
 // Datalink type detected at startup — set by main() after open_live()
 // DLT_EN10MB=1 (Ethernet), DLT_LINUX_SLL=113 (Docker/cooked)
 int g_datalink = 1;

@@ -4,16 +4,20 @@
 // ---------------------------------------------------------------------------
 // HeaderStats — O(1) header length accumulation.
 //
-// CICFlowMeter definition:
-//   Fwd Header Length = sum of (ip_header_len + tcp_header_len) for all fwd pkts
-//   Bwd Header Length = sum of (ip_header_len + tcp_header_len) for all bwd pkts
+// FIX: CICFlowMeter's "Fwd Header Length" / "Bwd Header Length" tracks
+// only the L4 (transport) header bytes — NOT the IP header.
 //
-// For UDP: tcp_header_len = 8 (UDP header size)
-// For ICMP/other: tcp_header_len = 0
+// Evidence from CIC-IDS 2018 training data:
+//   BruteForce flows: avg header per fwd pkt = 32.0
+//   This matches TCP header with timestamp option (32 bytes).
+//   If IP header (20) were included, avg would be 52+.
 //
-// Fwd Header Length.1 is an exact duplicate of Fwd Header Length —
-// it's a CSV artifact from CICFlowMeter. FeatureExtractor outputs the
-// same value twice under both names.
+// Also: In the CIC-IDS 2018 CSV, "Fwd Seg Size Min" is an exact
+// duplicate of "Fwd Header Len" (verified: 5000/5000 match in test.csv).
+// FeatureExtractor uses fwd_header_length() for both features.
+//
+// For UDP: l4_header_len = 8 (UDP header size)
+// For ICMP/other: l4_header_len = 0
 // ---------------------------------------------------------------------------
 struct HeaderStats {
 
@@ -22,13 +26,14 @@ struct HeaderStats {
     uint64_t bwd_header_bytes{0};   // [8]  Bwd Header Length
 
     // Update — O(1), no allocation
-    // l4_header_len: tcp_header_len for TCP, 8 for UDP, 0 for ICMP/other
+    // FIX: Only count L4 header, not IP header, matching CICFlowMeter.
+    // ip_header_len is still passed for API consistency but not used here.
     inline void update(uint16_t ip_header_len,
                        uint16_t l4_header_len,
                        bool     forward) noexcept
     {
-        const uint32_t total = static_cast<uint32_t>(ip_header_len)
-                             + static_cast<uint32_t>(l4_header_len);
+        (void)ip_header_len;  // not used — CIC only counts L4 header
+        const uint32_t total = static_cast<uint32_t>(l4_header_len);
         if (forward)
             fwd_header_bytes += total;
         else
@@ -42,5 +47,6 @@ struct HeaderStats {
 
     // [12] Fwd Header Length
     // [17] Fwd Header Length.1  (alias — same value, output twice in extractor)
+    // [59] Fwd Seg Size Min — CIC-IDS 2018: identical to Fwd Header Len
     uint64_t fwd_header_length() const noexcept { return fwd_header_bytes; }
 };

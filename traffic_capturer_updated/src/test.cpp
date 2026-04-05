@@ -16,7 +16,7 @@ static bool nearly(float a, float b, float eps = 0.1f) {
 static void test_feature_count() {
     std::cout << "── Test 1: feature count + no NaN/inf ──\n";
     FlowKey key(1,2,100,200,6);
-    Flow f(key, 0);
+    Flow f(key, 0, 0);
     PacketMeta m{};
     m.ts_us=0; m.ip_total_len=60; m.ip_header_len=20;
     m.tcp_header_len=20; m.tcp_window=65535;
@@ -58,7 +58,7 @@ static void test_2018_csv_order() {
 static void test_tcp_flow() {
     std::cout << "── Test 3: multi-packet TCP flow ──\n";
     FlowKey key(1,2,4444,80,6);
-    Flow f(key, 0);
+    Flow f(key, 0, 0);
 
     struct P { uint64_t ts; uint16_t tot,ip_h,tcp_h,win; uint32_t pl; uint8_t fl; bool fwd; };
     P pkts[] = {
@@ -85,16 +85,16 @@ static void test_tcp_flow() {
     assert(nearly(feat[0], 20500.0f));
     // [1]  Tot Fwd Pkts = 4
     assert(nearly(feat[1], 4.0f));
-    // [2]  Tot Bwd Pkts = 3  (wait — 3 bwd packets: SYN-ACK, PSH+ACK, RST+ACK)
+    // [2]  Tot Bwd Pkts = 3  (SYN-ACK, PSH+ACK, RST+ACK)
     assert(nearly(feat[2], 3.0f));
-    // [3]  TotLen Fwd Pkts = 60+40+540+40 = 680
-    assert(nearly(feat[3], 680.0f));
-    // [4]  TotLen Bwd Pkts = 60+1040+40 = 1140
-    assert(nearly(feat[4], 1140.0f));
-    // [5]  Fwd Pkt Len Max = 540
-    assert(nearly(feat[5], 540.0f));
-    // [6]  Fwd Pkt Len Min = 40
-    assert(nearly(feat[6], 40.0f));
+    // [3]  TotLen Fwd Pkts = payload only: (60-20-20)+(40-20-20)+(540-20-20)+(40-20-20) = 20+0+500+0 = 520
+    assert(nearly(feat[3], 520.0f));
+    // [4]  TotLen Bwd Pkts = payload only: (60-20-20)+(1040-20-20)+(40-20-20) = 20+1000+0 = 1020
+    assert(nearly(feat[4], 1020.0f));
+    // [5]  Fwd Pkt Len Max = 500 (payload of PSH+ACK)
+    assert(nearly(feat[5], 500.0f));
+    // [6]  Fwd Pkt Len Min = 0 (payload of ACK/FIN)
+    assert(nearly(feat[6], 0.0f));
     // [29] Fwd PSH Flags = 1
     assert(nearly(feat[29], 1.0f));
     // [30] Fwd URG Flags = 0
@@ -131,8 +131,8 @@ static void test_tcp_flow() {
     assert(nearly(feat[57], 8192.0f));
     // [58] Fwd Act Data Pkts = 2 (SYN w/ payload=20, PSH w/ payload=500)
     assert(nearly(feat[58], 2.0f));
-    // [59] Fwd Seg Size Min = 20
-    assert(nearly(feat[59], 20.0f));
+    // [59] Fwd Seg Size Min = Fwd Header Len = 4 fwd pkts × 20 TCP hdr = 80
+    assert(nearly(feat[59], 80.0f));
 
     // No NaN/inf
     for (size_t i = 0; i < feat.size(); ++i)
@@ -173,7 +173,7 @@ static void test_dict_builder() {
 static void test_zero_duration() {
     std::cout << "── Test 5: zero-duration — rates = 0 ──\n";
     FlowKey key(1,2,10,20,6);
-    Flow f(key, 500'000);
+    Flow f(key, 500'000, 500'000);
     PacketMeta m{};
     m.ts_us=500'000; m.ip_total_len=100; m.ip_header_len=20;
     m.tcp_header_len=20; m.tcp_window=512;
@@ -192,7 +192,7 @@ static void test_zero_duration() {
 static void test_new_flags() {
     std::cout << "── Test 6: new flags (RST, ECE, Fwd URG) ──\n";
     FlowKey key(1,2,1000,2000,6);
-    Flow f(key, 0);
+    Flow f(key, 0, 0);
 
     auto pkt = [&](uint8_t flags, bool fwd, uint64_t ts) {
         PacketMeta m{};

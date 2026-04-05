@@ -101,7 +101,10 @@ struct Flow {
     // ── Constructors ─────────────────────────────────────────────────────
     Flow() = default;
     Flow(const FlowKey &k, uint64_t pcap_ts_us, uint64_t wall_ts_us)
-        : key(k), start_ts_us(pcap_ts_us), last_seen_ts_us(wall_ts_us) {}
+        : key(k),
+          start_ts_us(pcap_ts_us),
+          last_seen_ts_us(wall_ts_us),
+          last_pcap_ts_us(pcap_ts_us) {}   // ← initialize to first packet time
 
     // ── Main update — called once per packet ─────────────────────────────
     // PacketMeta carries every field all six modules need.
@@ -115,7 +118,10 @@ struct Flow {
         last_pcap_ts_us  = meta.ts_us;         // pcap time  — duration
 
         // Delegate to every module — each is O(1), no allocation
-        length.update(meta.ip_total_len, meta.forward);
+        // FIX: Pass all header lengths so LengthStats computes payload-only
+        // lengths matching CICFlowMeter semantics.
+        length.update(meta.ip_total_len, meta.ip_header_len,
+                      meta.tcp_header_len, meta.forward);
         iat.update(meta.ts_us, meta.forward);     // pcap time — real wire IAT
         activity.update(meta.ts_us);              // pcap time — real active/idle
         headers.update(meta.ip_header_len, meta.tcp_header_len, meta.forward);

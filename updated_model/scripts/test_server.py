@@ -3,7 +3,7 @@ import random
 import time
 import statistics
 
-SERVER_URL = "http://localhost:5000/predict"
+SERVER_URL = "http://localhost:8000/predict"
 
 TOTAL_REQUESTS = 10
 CONCURRENCY = 1

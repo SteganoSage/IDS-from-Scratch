@@ -278,12 +278,21 @@ def validate(req: PredictRequest):
     latency_ms = (time.perf_counter() - t0) * 1000
 
     alert = result.get("alert")
-    log.info(
-        f"VALIDATE  {'AGREE' if alert else 'DISAGREE':8s}  "
-        f"{result['signature'].get('label_name','?'):20s}  "
-        f"conf={result['signature'].get('confidence',0)*100:5.1f}%  "
-        f"{latency_ms:.1f}ms"
-    )
+    if alert:
+        log.info(
+            f"VALIDATE  AGREE      "
+            f"{alert.get('label_name','?'):20s}  "
+            f"fusion={alert.get('fusion','?'):20s}  "
+            f"severity={alert.get('severity','?'):8s}  "
+            f"{latency_ms:.1f}ms"
+        )
+    else:
+        log.info(
+            f"VALIDATE  DISAGREE   "
+            f"Benign                "
+            f"anomaly_score={result['anomaly'].get('anomaly_score',0):.3f}  "
+            f"{latency_ms:.1f}ms"
+        )
 
     # No blockchain forwarding — just return the inference result
     return PredictResponse(

@@ -287,6 +287,10 @@ class Node(PBFT_Node, CryptoUtils):
             print(f"[Node {self.node_id}] DECIDED but block not in pool "
                   f"{block_hash[:12]}… — ignoring")
             return
+        
+        # ── Populate signatures from PBFT vote sets ──────────────────
+        block_dict["prepare_signatures"] = list(self.Prepare[block_hash])
+        block_dict["commit_signatures"]  = list(self.Commit[block_hash])
 
         block   = Block.from_dict(block_dict)
         success = self.blockchain.add_block(block)
@@ -492,6 +496,21 @@ class Node(PBFT_Node, CryptoUtils):
         if success:
             print(f"[Node {self.node_id}] ✓ Chain synced — "
                   f"at block {len(self.blockchain.chain) - 1}")
+
+            # Persist any blocks downloaded from peers that are not yet in DB.
+            # replace_chain() only updates the in-memory chain — without this,
+            # synced blocks are lost on restart and the node re-downloads them
+            # every time it starts up.
+            db_length    = self.db.get_chain_length()   # excludes genesis
+            chain_length = len(self.blockchain.chain) - 1  # excludes genesis
+
+            if chain_length > db_length:
+                missing = chain_length - db_length
+                print(f"[Node {self.node_id}] Writing {missing} synced "
+                      f"block(s) to DB (had {db_length}, chain now {chain_length})...")
+                for block in self.blockchain.chain[db_length + 1:]:
+                    self.db.save_block(block)
+                print(f"[Node {self.node_id}] ✓ DB updated to block {chain_length}")
         else:
             print(f"[Node {self.node_id}] ✗ Sync rejected — invalid chain "
                   f"from peer {best_peer}")

@@ -89,3 +89,5 @@ config/*.local
 # features.json
 # features_v2.json
 # labels.json
+
+extras/

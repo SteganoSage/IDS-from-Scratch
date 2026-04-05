@@ -40,7 +40,6 @@ struct ActivityStats {
     // Update — called for every packet in timestamp order, O(1)
     inline void update(uint64_t ts_us) noexcept {
         if (!first_pkt_seen) {
-            // First packet: begin the first active period
             current_active_start = ts_us;
             last_pkt_ts          = ts_us;
             first_pkt_seen       = true;
@@ -53,18 +52,17 @@ struct ActivityStats {
                        : 0;
 
         if (gap >= IDLE_THRESHOLD_US) {
-            // ── Idle gap detected ─────────────────────────────────────────
-            // 1. Finalize the active period that just ended
-            uint64_t active_dur = last_pkt_ts - current_active_start;
+            // Finalize the active period that just ended
+            // Guard: current_active_start must be <= last_pkt_ts
+            // If somehow it's 0 or ahead, clamp to 0 duration
+            uint64_t active_dur = (last_pkt_ts > current_active_start)
+                                  ? last_pkt_ts - current_active_start
+                                  : 0;
             active_stats.update(static_cast<double>(active_dur));
 
-            // 2. Record the idle gap
             idle_stats.update(static_cast<double>(gap));
-
-            // 3. Start a new active period from this packet
             current_active_start = ts_us;
         }
-        // else: gap < threshold → still in the same active period, nothing to record
 
         last_pkt_ts = ts_us;
     }

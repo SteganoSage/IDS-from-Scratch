@@ -127,7 +127,7 @@ class PBFT_Node:
         self._store_block(bh, block_dict)
 
         # Send our own PREPARE if we haven't yet and we now have the block
-        self._send_prepare(bh)
+        # self._send_prepare(bh)
 
         self.Prepare[bh].add(sender)
         print(f"[PBFT {self.Node_Id}] PREPARE votes for {bh[:12]}…: "
@@ -144,7 +144,7 @@ class PBFT_Node:
 
         # Store block as fallback
         self._store_block(bh, block_dict)
-        self._send_prepare(bh)
+        # self._send_prepare(bh)
 
         self.Commit[bh].add(sender)
         print(f"[PBFT {self.Node_Id}] COMMIT votes for {bh[:12]}…: "

@@ -419,7 +419,81 @@ flow1 = {
 "Idle Min":0.0
 }
 
-flows2 = [flow1]
+flow = {
+"Flow Duration":47969540.0,
+"Tot Fwd Pkts":18.0,
+"Tot Bwd Pkts":34.0,
+"TotLen Fwd Pkts":2234.0,
+"TotLen Bwd Pkts":2366.0,
+"Fwd Pkt Len Max":138.0,
+"Fwd Pkt Len Min":52.0,
+"Fwd Pkt Len Mean":124.1111,
+"Fwd Pkt Len Std":31.0946,
+"Bwd Pkt Len Max":92.0,
+"Bwd Pkt Len Min":52.0,
+"Bwd Pkt Len Mean":69.5882,
+"Bwd Pkt Len Std":19.3697,
+"Flow Byts/s":95.8942,
+"Flow Pkts/s":1.0840,
+"Flow IAT Mean":940584.5,
+"Flow IAT Std":1510887.25,
+"Flow IAT Max":5958508.0,
+"Flow IAT Min":13.0,
+"Fwd IAT Tot":47969392.0,
+"Fwd IAT Mean":2821728.75,
+"Fwd IAT Std":1241637.25,
+"Fwd IAT Max":5958853.0,
+"Fwd IAT Min":257.0,
+"Bwd IAT Tot":47969808.0,
+"Bwd IAT Mean":1453630.625,
+"Bwd IAT Std":1667980.25,
+"Bwd IAT Max":5958508.0,
+"Bwd IAT Min":71.0,
+"Fwd PSH Flags":15.0,
+"Fwd URG Flags":0.0,
+"Fwd Header Len":944.0,
+"Bwd Header Len":1776.0,
+"Fwd Pkts/s":0.3752,
+"Bwd Pkts/s":0.7088,
+"Pkt Len Min":52.0,
+"Pkt Len Max":138.0,
+"Pkt Len Mean":88.4615,
+"Pkt Len Std":35.3953,
+"Pkt Len Var":1252.8254,
+"FIN Flag Cnt":2.0,
+"SYN Flag Cnt":2.0,
+"RST Flag Cnt":0.0,
+"PSH Flag Cnt":30.0,
+"ACK Flag Cnt":51.0,
+"URG Flag Cnt":0.0,
+"ECE Flag Cnt":0.0,
+"Down/Up Ratio":1.8889,
+"Pkt Size Avg":88.4615,
+"Fwd Seg Size Avg":124.1111,
+"Bwd Seg Size Avg":69.5882,
+"Fwd Byts/b Avg":0.0,
+"Subflow Fwd Pkts":18.0,
+"Subflow Fwd Byts":2234.0,
+"Subflow Bwd Pkts":34.0,
+"Subflow Bwd Byts":2366.0,
+"Init Fwd Win Byts":65483.0,
+"Init Bwd Win Byts":65495.0,
+"Fwd Act Data Pkts":15.0,
+"Fwd Seg Size Min":32.0,
+
+# ✅ FIXED (Bot-like realistic values)
+"Active Mean":250000.0,
+"Active Std":120000.0,
+"Active Max":600000.0,
+
+"Active Min":71.0,
+"Idle Mean":3197652.0,
+"Idle Std":737869.8125,
+"Idle Max":5958508.0,
+"Idle Min":3000153.0
+}
+
+flows2 = [flow]
 
 flows = [flow_ddos, flow_slow_scan, flow_exfiltration]
 

@@ -5,8 +5,13 @@
 // ---------------------------------------------------------------------------
 // LengthStats — O(1) per-packet packet length statistics.
 //
-// Uses ip_total_len (from IP header) for ALL length calculations,
+// FIX: Uses PAYLOAD-ONLY length (ip_total_len - ip_header - l4_header),
 // matching CICFlowMeter semantics exactly.
+//
+// CICFlowMeter computes packet lengths as:
+//   payload_len = ip_total_len - ip_header_len - tcp/udp_header_len
+// This gives the application-layer (L7) payload bytes only, which is
+// what the CIC-IDS 2018 training data contains.
 //
 // Three RunningStats instances:
 //   flow_len  → all packets  (Packet Length Mean/Std/Variance, Min, Max)
@@ -22,19 +27,32 @@ struct LengthStats {
     RunningStats fwd_len;           // forward packets only
     RunningStats bwd_len;           // backward packets only
 
-    uint64_t fwd_total_bytes{0};    // sum of ip_total_len for fwd packets
-    uint64_t bwd_total_bytes{0};    // sum of ip_total_len for bwd packets
+    uint64_t fwd_total_bytes{0};    // sum of payload bytes for fwd packets
+    uint64_t bwd_total_bytes{0};    // sum of payload bytes for bwd packets
 
     // Update with one packet — O(1), no allocation
-    inline void update(uint16_t ip_total_len, bool forward) noexcept {
-        const double len = static_cast<double>(ip_total_len);
+    // FIX: Now receives all three header components and computes payload-only length.
+    //   ip_total_len  : from IP header Total Length field
+    //   ip_header_len : IP header length in bytes (IHL * 4, typically 20)
+    //   l4_header_len : L4 header length (TCP: 20-60, UDP: 8, ICMP/other: 0)
+    inline void update(uint16_t ip_total_len,
+                       uint16_t ip_header_len,
+                       uint16_t l4_header_len,
+                       bool     forward) noexcept
+    {
+        // CICFlowMeter: packet length = payload only (no headers)
+        const int32_t raw = static_cast<int32_t>(ip_total_len)
+                          - static_cast<int32_t>(ip_header_len)
+                          - static_cast<int32_t>(l4_header_len);
+        const double len = static_cast<double>(raw > 0 ? raw : 0);
+
         flow_len.update(len);
         if (forward) {
             fwd_len.update(len);
-            fwd_total_bytes += ip_total_len;
+            fwd_total_bytes += static_cast<uint64_t>(raw > 0 ? raw : 0);
         } else {
             bwd_len.update(len);
-            bwd_total_bytes += ip_total_len;
+            bwd_total_bytes += static_cast<uint64_t>(raw > 0 ? raw : 0);
         }
     }
 

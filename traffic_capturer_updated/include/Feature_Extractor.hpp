@@ -293,7 +293,10 @@ public:
         f.push_back(static_cast<float>(flow.tcp.act_data_pkts_fwd()));
 
         // [59] Fwd Seg Size Min
-        f.push_back(static_cast<float>(flow.tcp.min_seg_size_forward()));
+        // FIX: In CIC-IDS 2018, this column is an exact duplicate of
+        // Fwd Header Len (verified: 5000/5000 match against test.csv).
+        // Old code used min TCP header length (~20 always) — wrong.
+        f.push_back(static_cast<float>(flow.headers.fwd_header_length()));
 
         // [60] Active Mean
         f.push_back(static_cast<float>(flow.activity.active_mean()));

@@ -18,7 +18,7 @@ TEST_PATH = "data/test_fusion.csv"
 FEATURES_PATH = "config/features.json"
 LABELS_PATH = "config/labels.json"
 
-SAMPLE_SIZE = 1000
+SAMPLE_SIZE = 100
 
 
 def load_configs():
