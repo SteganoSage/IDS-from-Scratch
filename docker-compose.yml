@@ -1,0 +1,125 @@
+services:
+
+  node0:
+    build: .
+    container_name: node0
+    networks:
+      - ids-net
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "9000:9000"
+      - "15000:5000"
+      - "20000:8000"
+    volumes:
+      - ./data/node0:/app/updated_blockchain/database
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NODE_ID: "0"
+      TARGET_PORT: "9000"
+      ENABLED_MODELS: "rf,anomaly"
+      BLOCKCHAIN_PORT: "5000"
+      BLOCKCHAIN_NODE_URL: "http://127.0.0.1:5000"
+      ML_SERVER_URL: "http://127.0.0.1:8000"
+    restart: unless-stopped
+
+  node1:
+    build: .
+    container_name: node1
+    networks:
+      - ids-net
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "9001:9001"
+      - "15001:5000"
+      - "20001:8000"
+    volumes:
+      - ./data/node1:/app/updated_blockchain/database
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NODE_ID: "1"
+      TARGET_PORT: "9001"
+      ENABLED_MODELS: "lgbm,anomaly"
+      BLOCKCHAIN_PORT: "5000"
+      BLOCKCHAIN_NODE_URL: "http://127.0.0.1:5000"
+      ML_SERVER_URL: "http://127.0.0.1:8000"
+    restart: unless-stopped
+
+  node2:
+    build: .
+    container_name: node2
+    networks:
+      - ids-net
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "9002:9002"
+      - "15002:5000"
+      - "20002:8000"
+    volumes:
+      - ./data/node2:/app/updated_blockchain/database
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NODE_ID: "2"
+      TARGET_PORT: "9002"
+      ENABLED_MODELS: "xgb,anomaly"
+      BLOCKCHAIN_PORT: "5000"
+      BLOCKCHAIN_NODE_URL: "http://127.0.0.1:5000"
+      ML_SERVER_URL: "http://127.0.0.1:8000"
+    restart: unless-stopped
+
+  node3:
+    build: .
+    container_name: node3
+    networks:
+      - ids-net
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "9003:9003"
+      - "15003:5000"
+      - "20003:8000"
+    volumes:
+      - ./data/node3:/app/updated_blockchain/database
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NODE_ID: "3"
+      TARGET_PORT: "9003"
+      ENABLED_MODELS: "rf,lgbm,xgb"
+      BLOCKCHAIN_PORT: "5000"
+      BLOCKCHAIN_NODE_URL: "http://127.0.0.1:5000"
+      ML_SERVER_URL: "http://127.0.0.1:8000"
+    restart: unless-stopped
+
+  node4:
+    build: .
+    container_name: node4
+    networks:
+      - ids-net
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "9004:9004"
+      - "15004:5000"
+      - "20004:8000"
+    volumes:
+      - ./data/node4:/app/updated_blockchain/database
+    environment:
+      PYTHONUNBUFFERED: "1"
+      NODE_ID: "4"
+      TARGET_PORT: "9004"
+      ENABLED_MODELS: "anomaly"
+      BLOCKCHAIN_PORT: "5000"
+      BLOCKCHAIN_NODE_URL: "http://127.0.0.1:5000"
+      ML_SERVER_URL: "http://127.0.0.1:8000"
+    restart: unless-stopped
+
+networks:
+  ids-net:
+    driver: bridge

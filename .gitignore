@@ -91,3 +91,4 @@ config/*.local
 # labels.json
 
 extras/
+dashboard/

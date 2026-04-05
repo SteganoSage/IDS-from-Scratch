@@ -1,0 +1,21 @@
+# Exclude old C++ build cache — Docker builds fresh inside container
+traffic_capturer_updated/build/
+
+# Exclude raw training data — not needed at runtime
+updated_model/data/
+updated_model/training/
+updated_model/preprocessing/
+updated_model/scripts/
+
+# Exclude Python venvs
+**/venv/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Exclude blockchain databases — fresh start in container
+updated_blockchain/database/
+
+# Exclude zip files
+**/*.zip
